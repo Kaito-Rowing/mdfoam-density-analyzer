@@ -233,6 +233,53 @@ def sync_remote_case(
     return local_case
 
 
+def sync_remote_lagrangian_time(
+    sftp,
+    profile: RemoteProfile,
+    remote_case: str,
+    local_case: Path,
+    time_name: str,
+    stop_requested=lambda: False,
+    log=lambda message: None,
+) -> None:
+    remote_case = normalize_remote_path(remote_case)
+    files: list[RemoteFile] = []
+    for file_name in ("positions", "id"):
+        remote_path = remote_join(
+            remote_case,
+            "main",
+            time_name,
+            "lagrangian",
+            "moleculeCloud",
+            file_name,
+        )
+        if is_remote_file(sftp, remote_path):
+            files.append(
+                _remote_file(
+                    sftp,
+                    remote_path,
+                    remote_join("main", time_name, "lagrangian", "moleculeCloud", file_name),
+                )
+            )
+
+    downloaded = 0
+    reused = 0
+    for item in files:
+        if stop_requested():
+            break
+        local_path = local_case / Path(*PurePosixPath(item.relative_path).parts)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        if is_cached_file_current(local_path, item.size, item.mtime):
+            reused += 1
+            continue
+        sftp.get(item.remote_path, str(local_path))
+        if item.mtime is not None:
+            os.utime(local_path, (item.mtime, item.mtime))
+        downloaded += 1
+    if files:
+        log(f"{remote_name(remote_case)} {time_name}: Lagrangian {downloaded} ファイル取得, {reused} ファイル再利用")
+
+
 def _required_remote_files(sftp, remote_case: str, density_field: str) -> list[RemoteFile]:
     main_dir = remote_join(remote_case, "main")
     reconstructed_times = [

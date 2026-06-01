@@ -53,6 +53,20 @@ class TimeResult:
     contact_fit_point_count: int = 0
 
 
+@dataclass(frozen=True)
+class ContactFitDiagnostics:
+    raw_points: np.ndarray
+    points: np.ndarray
+    fit_mask: np.ndarray
+    z_base: float | None
+    sphere_center: tuple[float, float, float] | None
+    sphere_radius: float | None
+    contact_angle_deg: float | None
+    contact_radius: float | None
+    fit_point_count: int
+    failure_reason: str = ""
+
+
 @dataclass
 class CaseResult:
     case_name: str
@@ -434,10 +448,43 @@ def _contact_metrics(
     ] | None,
     settings: AnalysisSettings,
 ) -> tuple[float | None, float | None, int]:
-    if not selected_centers or len(selected_centers) < 4:
-        return None, None, 0
+    diagnostics = contact_fit_diagnostics(selected_centers, point_bounds, settings)
+    return (
+        diagnostics.contact_angle_deg,
+        diagnostics.contact_radius,
+        diagnostics.fit_point_count,
+    )
 
-    points = np.asarray(selected_centers, dtype=float)
+
+def contact_fit_diagnostics(
+    selected_centers: list[tuple[float, float, float]] | None,
+    point_bounds: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] | None,
+    settings: AnalysisSettings,
+) -> ContactFitDiagnostics:
+    if not selected_centers:
+        empty = np.empty((0, 3), dtype=float)
+        return ContactFitDiagnostics(empty, empty, np.zeros(0, dtype=bool), None, None, None, None, None, 0, "液滴点がありません")
+
+    raw_points = np.asarray(selected_centers, dtype=float)
+    if len(raw_points) < 4:
+        return ContactFitDiagnostics(
+            raw_points,
+            raw_points,
+            np.zeros(len(raw_points), dtype=bool),
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            "液滴点が4点未満です",
+        )
+
+    points = raw_points.copy()
     if settings.contact_unwrap_xy and point_bounds is not None:
         points = _unwrap_xy(points, point_bounds)
 
@@ -446,7 +493,7 @@ def _contact_metrics(
     z_max = float(np.max(z_values))
     z_height = z_max - z_min
     if z_height <= 0.0:
-        return None, None, 0
+        return ContactFitDiagnostics(raw_points, points, np.zeros(len(points), dtype=bool), None, None, None, None, None, 0, "z方向高さが0です")
 
     z_base_threshold = z_min + 0.05 * z_height
     base_z = z_values[z_values <= z_base_threshold]
@@ -458,22 +505,32 @@ def _contact_metrics(
     fit_mask = (z_values >= z_fit_lower) & (z_values <= z_fit_upper)
     fit_count = int(np.count_nonzero(fit_mask))
     if fit_count < 4:
-        return None, None, fit_count
+        return ContactFitDiagnostics(raw_points, points, fit_mask, z_base, None, None, None, None, fit_count, "fit点が4点未満です")
 
     sphere = _fit_sphere_algebraic(points[fit_mask])
     if sphere is None:
-        return None, None, fit_count
+        return ContactFitDiagnostics(raw_points, points, fit_mask, z_base, None, None, None, None, fit_count, "球フィットに失敗しました")
 
-    _, _, z_center, radius = sphere
+    x_center, y_center, z_center, radius = sphere
     if radius < 1.0e-12:
-        return None, None, fit_count
+        return ContactFitDiagnostics(raw_points, points, fit_mask, z_base, (x_center, y_center, z_center), radius, None, None, fit_count, "球半径が小さすぎます")
 
     cos_arg = (z_base - z_center) / radius
     cos_arg = max(-1.0, min(1.0, cos_arg))
     theta_rad = math.acos(cos_arg)
     contact_angle_deg = math.degrees(theta_rad)
     contact_radius = radius * math.sin(theta_rad)
-    return contact_angle_deg, contact_radius, fit_count
+    return ContactFitDiagnostics(
+        raw_points,
+        points,
+        fit_mask,
+        z_base,
+        (x_center, y_center, z_center),
+        radius,
+        contact_angle_deg,
+        contact_radius,
+        fit_count,
+    )
 
 
 def _normalized_fit_range(settings: AnalysisSettings) -> tuple[float, float]:

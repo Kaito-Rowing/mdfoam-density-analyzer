@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QProgressBar,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -41,8 +42,10 @@ from PySide6.QtGui import QDoubleValidator
 from PySide6.QtGui import QKeySequence
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.animation import PillowWriter
 from matplotlib.figure import Figure
 from matplotlib import rcParams
+import numpy as np
 
 from .analysis import (
     AnalysisSettings,
@@ -65,7 +68,16 @@ from .remote import (
     remote_join,
     remote_name,
     sync_remote_case,
+    sync_remote_lagrangian_time,
     validate_private_key_path,
+)
+from .visualization import (
+    VisualizationFrame,
+    case_time_dirs,
+    load_visualization_frame,
+    read_remote_case_from_manifest,
+    replicate_xy,
+    downsample_points,
 )
 
 
@@ -251,6 +263,269 @@ class PlotWidget(QWidget):
 
     def save_png(self, path: Path) -> None:
         self.figure.savefig(path, dpi=180)
+
+
+class VisualizationPlotWidget(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.figure = Figure(figsize=(6, 4), tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.canvas)
+
+    def clear(self, message: str = "可視化するケースと時刻を選択してください") -> None:
+        self.figure.clear()
+        axis = self.figure.add_subplot(111)
+        axis.text(0.5, 0.5, message, ha="center", va="center", transform=axis.transAxes)
+        axis.set_axis_off()
+        self.canvas.draw_idle()
+
+    def draw_frame(
+        self,
+        frame: VisualizationFrame,
+        mode: str,
+        projection: str,
+        periodic_enabled: bool,
+        tile_count: int,
+        point_size: float,
+        max_points: int,
+        show_legend: bool,
+        show_liquid: bool,
+        show_fit: bool,
+    ) -> None:
+        self.figure.clear()
+        particles = frame.particles.positions
+        particle_ids = frame.particles.ids
+        if periodic_enabled:
+            particles, particle_ids = replicate_xy(
+                particles,
+                frame.point_bounds,
+                tile_count,
+                particle_ids,
+            )
+        particles, particle_ids = downsample_points(particles, particle_ids, max_points)
+
+        if mode == "3D概観":
+            axis = self.figure.add_subplot(111, projection="3d")
+            self._draw_3d(axis, frame, particles, particle_ids, point_size, show_legend, show_liquid, show_fit)
+        else:
+            axis = self.figure.add_subplot(111)
+            self._draw_2d(axis, frame, particles, particle_ids, projection, point_size, show_legend, show_liquid, show_fit)
+        self.canvas.draw_idle()
+
+    def save_png(self, path: Path) -> None:
+        self.figure.savefig(path, dpi=180)
+
+    def _draw_2d(
+        self,
+        axis,
+        frame: VisualizationFrame,
+        particles: np.ndarray,
+        particle_ids: np.ndarray | None,
+        projection: str,
+        point_size: float,
+        show_legend: bool,
+        show_liquid: bool,
+        show_fit: bool,
+    ) -> None:
+        axis_index, labels = _projection_axes(projection)
+        self._scatter_by_id_2d(axis, particles, particle_ids, axis_index, point_size, show_legend)
+
+        if show_liquid and len(frame.selected_centers) > 0:
+            axis.scatter(
+                frame.selected_centers[:, axis_index[0]],
+                frame.selected_centers[:, axis_index[1]],
+                s=max(point_size * 0.7, 2.0),
+                c="#4c78a8",
+                alpha=0.18,
+                label="液滴セル",
+            )
+
+        contact = frame.contact
+        if show_fit and len(contact.points) > 0 and len(contact.fit_mask) == len(contact.points):
+            fit_points = contact.points[contact.fit_mask]
+            if len(fit_points) > 0:
+                axis.scatter(
+                    fit_points[:, axis_index[0]],
+                    fit_points[:, axis_index[1]],
+                    s=max(point_size * 1.5, 8.0),
+                    facecolors="none",
+                    edgecolors="#d62728",
+                    linewidths=0.8,
+                    label="fit点",
+                )
+            self._draw_fit_geometry_2d(axis, contact, projection, axis_index)
+
+        axis.set_title(f"{frame.time_name}: {projection} 可視化")
+        axis.set_xlabel(labels[0])
+        axis.set_ylabel(labels[1])
+        axis.grid(True, alpha=0.25)
+        axis.set_aspect("equal", adjustable="datalim")
+        self._add_info_text(axis, frame)
+        if show_legend:
+            axis.legend(loc="best", fontsize=8, markerscale=1.8)
+
+    def _draw_3d(
+        self,
+        axis,
+        frame: VisualizationFrame,
+        particles: np.ndarray,
+        particle_ids: np.ndarray | None,
+        point_size: float,
+        show_legend: bool,
+        show_liquid: bool,
+        show_fit: bool,
+    ) -> None:
+        self._scatter_by_id_3d(axis, particles, particle_ids, point_size, show_legend)
+        if show_liquid and len(frame.selected_centers) > 0:
+            centers = frame.selected_centers
+            axis.scatter(centers[:, 0], centers[:, 1], centers[:, 2], s=max(point_size * 0.5, 1.0), c="#4c78a8", alpha=0.12, label="液滴セル")
+        contact = frame.contact
+        if show_fit and len(contact.points) > 0 and len(contact.fit_mask) == len(contact.points):
+            fit_points = contact.points[contact.fit_mask]
+            if len(fit_points) > 0:
+                axis.scatter(fit_points[:, 0], fit_points[:, 1], fit_points[:, 2], s=max(point_size * 1.4, 7.0), c="#d62728", alpha=0.85, label="fit点")
+            if contact.sphere_center is not None and contact.sphere_radius is not None:
+                self._draw_sphere_wire(axis, contact.sphere_center, contact.sphere_radius)
+            if contact.z_base is not None and frame.point_bounds is not None:
+                x0, x1 = frame.point_bounds[0]
+                y0, y1 = frame.point_bounds[1]
+                axis.plot([x0, x1], [y0, y0], [contact.z_base, contact.z_base], color="#333333", linestyle="--", linewidth=1.0, label="基板高さ")
+        axis.set_title(f"{frame.time_name}: 3D概観")
+        axis.set_xlabel("x [m]")
+        axis.set_ylabel("y [m]")
+        axis.set_zlabel("z [m]")
+        self._set_3d_equal(axis, frame)
+        self._add_info_text(axis, frame)
+        if show_legend:
+            axis.legend(loc="best", fontsize=8, markerscale=1.8)
+
+    def _scatter_by_id_2d(
+        self,
+        axis,
+        particles: np.ndarray,
+        particle_ids: np.ndarray | None,
+        axis_index: tuple[int, int],
+        point_size: float,
+        show_legend: bool,
+    ) -> None:
+        if len(particles) == 0:
+            return
+        if particle_ids is None:
+            axis.scatter(particles[:, axis_index[0]], particles[:, axis_index[1]], s=point_size, c="#666666", alpha=0.7, label="粒子")
+            return
+        unique_ids = np.unique(particle_ids)
+        cmap = self.figure.colormaps["tab20"] if hasattr(self.figure, "colormaps") else None
+        for index, id_value in enumerate(unique_ids):
+            mask = particle_ids == id_value
+            color = f"C{index % 10}" if cmap is None else cmap(index % 20)
+            label = f"id={id_value}" if show_legend and len(unique_ids) <= 20 else None
+            axis.scatter(particles[mask, axis_index[0]], particles[mask, axis_index[1]], s=point_size, color=color, alpha=0.72, label=label)
+
+    def _scatter_by_id_3d(
+        self,
+        axis,
+        particles: np.ndarray,
+        particle_ids: np.ndarray | None,
+        point_size: float,
+        show_legend: bool,
+    ) -> None:
+        if len(particles) == 0:
+            return
+        if particle_ids is None:
+            axis.scatter(particles[:, 0], particles[:, 1], particles[:, 2], s=point_size, c="#666666", alpha=0.7, label="粒子")
+            return
+        unique_ids = np.unique(particle_ids)
+        for index, id_value in enumerate(unique_ids):
+            mask = particle_ids == id_value
+            label = f"id={id_value}" if show_legend and len(unique_ids) <= 20 else None
+            axis.scatter(particles[mask, 0], particles[mask, 1], particles[mask, 2], s=point_size, color=f"C{index % 10}", alpha=0.72, label=label)
+
+    def _draw_fit_geometry_2d(
+        self,
+        axis,
+        contact,
+        projection: str,
+        axis_index: tuple[int, int],
+    ) -> None:
+        center = contact.sphere_center
+        radius = contact.sphere_radius
+        if center is None or radius is None:
+            return
+        angles = np.linspace(0.0, 2.0 * np.pi, 240)
+        if projection in ("xz", "yz"):
+            horizontal_axis = axis_index[0]
+            x_values = center[horizontal_axis] + radius * np.cos(angles)
+            z_values = center[2] + radius * np.sin(angles)
+            axis.plot(x_values, z_values, color="#d62728", linewidth=1.0, linestyle="--", label="球fit")
+            if contact.z_base is not None:
+                axis.axhline(contact.z_base, color="#333333", linewidth=1.0, linestyle="--", label="基板高さ")
+            if contact.z_base is not None and contact.contact_radius is not None:
+                axis.plot(
+                    [center[horizontal_axis] - contact.contact_radius, center[horizontal_axis] + contact.contact_radius],
+                    [contact.z_base, contact.z_base],
+                    color="#2ca02c",
+                    linewidth=2.0,
+                    label="接触半径",
+                )
+        elif projection == "xy":
+            x_values = center[0] + radius * np.cos(angles)
+            y_values = center[1] + radius * np.sin(angles)
+            axis.plot(x_values, y_values, color="#d62728", linewidth=1.0, linestyle=":", label="球fit投影")
+            if contact.contact_radius is not None:
+                axis.plot(
+                    center[0] + contact.contact_radius * np.cos(angles),
+                    center[1] + contact.contact_radius * np.sin(angles),
+                    color="#2ca02c",
+                    linewidth=1.2,
+                    label="接触円",
+                )
+
+    def _draw_sphere_wire(self, axis, center: tuple[float, float, float], radius: float) -> None:
+        u = np.linspace(0, 2 * np.pi, 24)
+        v = np.linspace(0, np.pi, 12)
+        x = center[0] + radius * np.outer(np.cos(u), np.sin(v))
+        y = center[1] + radius * np.outer(np.sin(u), np.sin(v))
+        z = center[2] + radius * np.outer(np.ones_like(u), np.cos(v))
+        axis.plot_wireframe(x, y, z, color="#d62728", linewidth=0.35, alpha=0.35)
+
+    def _set_3d_equal(self, axis, frame: VisualizationFrame) -> None:
+        arrays = [frame.particles.positions]
+        if len(frame.selected_centers) > 0:
+            arrays.append(frame.selected_centers)
+        points = np.concatenate([item for item in arrays if len(item) > 0], axis=0) if any(len(item) > 0 for item in arrays) else np.empty((0, 3))
+        if len(points) == 0:
+            return
+        mins = points.min(axis=0)
+        maxs = points.max(axis=0)
+        center = (mins + maxs) / 2.0
+        radius = max(float(np.max(maxs - mins)) / 2.0, 1.0e-30)
+        axis.set_xlim(center[0] - radius, center[0] + radius)
+        axis.set_ylim(center[1] - radius, center[1] + radius)
+        axis.set_zlim(center[2] - radius, center[2] + radius)
+
+    def _add_info_text(self, axis, frame: VisualizationFrame) -> None:
+        contact = frame.contact
+        angle = "-" if contact.contact_angle_deg is None else f"{contact.contact_angle_deg:.4g} deg"
+        radius = "-" if contact.contact_radius is None else f"{contact.contact_radius:.4g} m"
+        text = f"粒子 {len(frame.particles.positions)} / 液滴セル {len(frame.selected_centers)} / fit点 {contact.fit_point_count}\n接触角 {angle} / 接触半径 {radius}"
+        if frame.particles.id_warning:
+            text += f"\n{frame.particles.id_warning}"
+        if contact.failure_reason:
+            text += f"\n{contact.failure_reason}"
+        if hasattr(axis, "text2D"):
+            axis.text2D(0.01, 0.99, text, transform=axis.transAxes, va="top", fontsize=9)
+        else:
+            axis.text(0.01, 0.99, text, transform=axis.transAxes, va="top", fontsize=9)
+
+
+def _projection_axes(projection: str) -> tuple[tuple[int, int], tuple[str, str]]:
+    if projection == "yz":
+        return (1, 2), ("y [m]", "z [m]")
+    if projection == "xy":
+        return (0, 1), ("x [m]", "y [m]")
+    return (0, 2), ("x [m]", "z [m]")
 
 
 APP_SETTINGS_DIR = (
