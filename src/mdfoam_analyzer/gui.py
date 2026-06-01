@@ -306,7 +306,7 @@ class VisualizationPlotWidget(QWidget):
             )
         particles, particle_ids = downsample_points(particles, particle_ids, max_points)
 
-        if mode == "3D概観":
+        if mode.startswith("3D"):
             axis = self.figure.add_subplot(111, projection="3d")
             self._draw_3d(axis, frame, particles, particle_ids, point_size, show_legend, show_liquid, show_fit)
         else:
@@ -833,11 +833,91 @@ class MainWindow(QMainWindow):
         self.contact_angle_plot = PlotWidget()
         self.contact_radius_plot = PlotWidget()
         self.evap_plot = PlotWidget()
+        self.visual_plot = VisualizationPlotWidget()
         self.tabs.addTab(self.volume_plot, "体積-時間")
         self.tabs.addTab(self.radius_plot, "等価半径-時間")
         self.tabs.addTab(self.contact_angle_plot, "接触角-時間")
         self.tabs.addTab(self.contact_radius_plot, "接触半径-時間")
         self.tabs.addTab(self.evap_plot, "蒸発完了時刻")
+        visual_tab = QWidget()
+        visual_layout = QVBoxLayout(visual_tab)
+        visual_top_row = QHBoxLayout()
+        self.visual_case_label = QLabel("ケース: -")
+        self.visual_time_label = QLabel("時刻: -")
+        self.visual_prev_button = QPushButton("前")
+        self.visual_next_button = QPushButton("次")
+        self.visual_time_slider = QSlider(Qt.Horizontal)
+        self.visual_time_slider.setEnabled(False)
+        visual_top_row.addWidget(self.visual_case_label)
+        visual_top_row.addWidget(self.visual_prev_button)
+        visual_top_row.addWidget(self.visual_time_slider, 1)
+        visual_top_row.addWidget(self.visual_next_button)
+        visual_top_row.addWidget(self.visual_time_label)
+        visual_layout.addLayout(visual_top_row)
+
+        visual_options_row = QHBoxLayout()
+        self.visual_mode_combo = QComboBox()
+        self.visual_mode_combo.addItems(["2D診断", "3D概観"])
+        self.visual_projection_combo = QComboBox()
+        self.visual_projection_combo.addItems(["xz", "yz", "xy"])
+        self.visual_periodic_check = QCheckBox("粒子周期表示")
+        self.visual_tile_spin = QSpinBox()
+        self.visual_tile_spin.setRange(1, 16)
+        self.visual_tile_spin.setValue(1)
+        self.visual_point_size_spin = QDoubleSpinBox()
+        self.visual_point_size_spin.setRange(0.1, 50.0)
+        self.visual_point_size_spin.setDecimals(1)
+        self.visual_point_size_spin.setValue(6.0)
+        self.visual_max_points_spin = QSpinBox()
+        self.visual_max_points_spin.setRange(0, 10_000_000)
+        self.visual_max_points_spin.setValue(0)
+        self.visual_legend_check = QCheckBox("凡例")
+        self.visual_legend_check.setChecked(True)
+        self.visual_liquid_check = QCheckBox("液滴セル")
+        self.visual_liquid_check.setChecked(True)
+        self.visual_fit_check = QCheckBox("fit診断")
+        self.visual_fit_check.setChecked(True)
+        visual_options_row.addWidget(QLabel("表示"))
+        visual_options_row.addWidget(self.visual_mode_combo)
+        visual_options_row.addWidget(QLabel("投影"))
+        visual_options_row.addWidget(self.visual_projection_combo)
+        visual_options_row.addWidget(self.visual_periodic_check)
+        visual_options_row.addWidget(QLabel("NxN"))
+        visual_options_row.addWidget(self.visual_tile_spin)
+        visual_options_row.addWidget(QLabel("点"))
+        visual_options_row.addWidget(self.visual_point_size_spin)
+        visual_options_row.addWidget(QLabel("最大点数"))
+        visual_options_row.addWidget(self.visual_max_points_spin)
+        visual_options_row.addWidget(self.visual_legend_check)
+        visual_options_row.addWidget(self.visual_liquid_check)
+        visual_options_row.addWidget(self.visual_fit_check)
+        visual_options_row.addStretch(1)
+        visual_layout.addLayout(visual_options_row)
+
+        visual_export_row = QHBoxLayout()
+        self.visual_range_start_slider = QSlider(Qt.Horizontal)
+        self.visual_range_end_slider = QSlider(Qt.Horizontal)
+        self.visual_range_start_slider.setEnabled(False)
+        self.visual_range_end_slider.setEnabled(False)
+        self.visual_range_label = QLabel("GIF範囲: -")
+        self.visual_fps_spin = QSpinBox()
+        self.visual_fps_spin.setRange(1, 60)
+        self.visual_fps_spin.setValue(8)
+        self.visual_png_button = QPushButton("PNG保存")
+        self.visual_gif_button = QPushButton("GIF保存")
+        visual_export_row.addWidget(QLabel("開始"))
+        visual_export_row.addWidget(self.visual_range_start_slider, 1)
+        visual_export_row.addWidget(QLabel("終了"))
+        visual_export_row.addWidget(self.visual_range_end_slider, 1)
+        visual_export_row.addWidget(self.visual_range_label)
+        visual_export_row.addWidget(QLabel("FPS"))
+        visual_export_row.addWidget(self.visual_fps_spin)
+        visual_export_row.addWidget(self.visual_png_button)
+        visual_export_row.addWidget(self.visual_gif_button)
+        visual_layout.addLayout(visual_export_row)
+        visual_layout.addWidget(self.visual_plot, 1)
+        self.visual_plot.clear()
+        self.tabs.addTab(visual_tab, "可視化")
         results_splitter = QSplitter(Qt.Vertical)
         results_splitter.addWidget(self.table)
         results_splitter.addWidget(self.tabs)
@@ -874,6 +954,22 @@ class MainWindow(QMainWindow):
         self.export_csv_button.clicked.connect(self.export_csv)
         self.export_png_button.clicked.connect(self.export_png)
         self.table.itemSelectionChanged.connect(self.update_selected_case_plots)
+        self.visual_time_slider.valueChanged.connect(self.on_visual_time_changed)
+        self.visual_prev_button.clicked.connect(lambda: self.set_visual_time_index(self.visual_time_slider.value() - 1))
+        self.visual_next_button.clicked.connect(lambda: self.set_visual_time_index(self.visual_time_slider.value() + 1))
+        self.visual_range_start_slider.valueChanged.connect(self.update_visual_range_label)
+        self.visual_range_end_slider.valueChanged.connect(self.update_visual_range_label)
+        self.visual_mode_combo.currentTextChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_projection_combo.currentTextChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_periodic_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_tile_spin.valueChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_point_size_spin.valueChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_max_points_spin.valueChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_legend_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_liquid_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_fit_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_png_button.clicked.connect(self.export_visual_png)
+        self.visual_gif_button.clicked.connect(self.export_visual_gif)
 
     @Slot(int)
     def select_table_column(self, column: int) -> None:
@@ -923,6 +1019,7 @@ class MainWindow(QMainWindow):
         self.cases = []
         self.remote_cases = []
         self.loaded_source = ""
+        self.update_visual_controls(None)
 
     def _load_ssh_profile(self) -> None:
         profile = _load_profile_settings()
@@ -1079,6 +1176,7 @@ class MainWindow(QMainWindow):
         self.field_combo.clear()
         self.results.clear()
         self.table.setRowCount(0)
+        self.update_visual_controls(None)
         self.remote_cases = []
         self.loaded_source = "ローカル"
         try:
@@ -1112,6 +1210,7 @@ class MainWindow(QMainWindow):
         self.field_combo.clear()
         self.results.clear()
         self.table.setRowCount(0)
+        self.update_visual_controls(None)
         self.cases = []
         self.loaded_source = "SSH"
         self.remote_cases = discover_remote_cases(self.remote_browser_connection.sftp, path)
@@ -1184,6 +1283,7 @@ class MainWindow(QMainWindow):
 
         self.results.clear()
         self.table.setRowCount(0)
+        self.update_visual_controls(None)
         self.progress.setRange(0, len(cases))
         self.progress.setValue(0)
         self.run_button.setEnabled(False)
@@ -1300,6 +1400,182 @@ class MainWindow(QMainWindow):
             [point[0] for point in radius_points],
             [point[1] for point in radius_points],
         )
+        self.update_visual_controls(result)
+
+    def current_result(self) -> CaseResult | None:
+        current_row = self.table.currentRow()
+        if current_row < 0:
+            return None
+        item = self.table.item(current_row, 0)
+        if item is None:
+            return None
+        result_index = item.data(Qt.UserRole)
+        if result_index is None or result_index >= len(self.results):
+            return None
+        return self.results[result_index]
+
+    def update_visual_controls(self, result: CaseResult | None = None) -> None:
+        result = result or self.current_result()
+        if result is None or not result.rows:
+            self.visual_case_label.setText("ケース: -")
+            self.visual_time_label.setText("時刻: -")
+            self.visual_range_label.setText("GIF範囲: -")
+            self.visual_time_slider.setEnabled(False)
+            self.visual_range_start_slider.setEnabled(False)
+            self.visual_range_end_slider.setEnabled(False)
+            self.visual_plot.clear()
+            return
+
+        count = len(result.rows)
+        self.visual_case_label.setText(f"ケース: {result.case_name}")
+        for slider in (self.visual_time_slider, self.visual_range_start_slider, self.visual_range_end_slider):
+            slider.blockSignals(True)
+            slider.setRange(0, count - 1)
+            slider.setEnabled(True)
+            slider.blockSignals(False)
+        self.visual_range_start_slider.blockSignals(True)
+        self.visual_range_end_slider.blockSignals(True)
+        self.visual_range_start_slider.setValue(0)
+        self.visual_range_end_slider.setValue(count - 1)
+        self.visual_range_start_slider.blockSignals(False)
+        self.visual_range_end_slider.blockSignals(False)
+        if self.visual_time_slider.value() >= count:
+            self.visual_time_slider.setValue(count - 1)
+        self.update_visual_range_label()
+        self.refresh_visualization()
+
+    def set_visual_time_index(self, index: int) -> None:
+        if not self.visual_time_slider.isEnabled():
+            return
+        index = max(self.visual_time_slider.minimum(), min(self.visual_time_slider.maximum(), index))
+        self.visual_time_slider.setValue(index)
+
+    @Slot(int)
+    def on_visual_time_changed(self, index: int) -> None:
+        self.refresh_visualization()
+
+    @Slot()
+    def update_visual_range_label(self) -> None:
+        result = self.current_result()
+        if result is None or not result.rows:
+            self.visual_range_label.setText("GIF範囲: -")
+            return
+        start, end = self._visual_range_indices()
+        self.visual_range_label.setText(
+            f"GIF範囲: {result.rows[start].time:.4g} - {result.rows[end].time:.4g}"
+        )
+
+    def refresh_visualization(self) -> None:
+        result = self.current_result()
+        if result is None or not result.rows or not self.visual_time_slider.isEnabled():
+            return
+        index = max(0, min(self.visual_time_slider.value(), len(result.rows) - 1))
+        row = result.rows[index]
+        self.visual_time_label.setText(f"時刻: {row.time:.8g}")
+        try:
+            frame = self._load_visual_frame(result, row.time)
+            self._draw_visual_frame(frame)
+        except Exception as exc:
+            self.visual_plot.clear(f"可視化データを読み込めません: {exc}")
+            self.log(f"可視化データを読み込めません: {exc}")
+
+    def _draw_visual_frame(self, frame: VisualizationFrame) -> None:
+        self.visual_plot.draw_frame(
+            frame,
+            self.visual_mode_combo.currentText(),
+            self.visual_projection_combo.currentText(),
+            self.visual_periodic_check.isChecked(),
+            self.visual_tile_spin.value(),
+            self.visual_point_size_spin.value(),
+            self.visual_max_points_spin.value(),
+            self.visual_legend_check.isChecked(),
+            self.visual_liquid_check.isChecked(),
+            self.visual_fit_check.isChecked(),
+        )
+
+    def _load_visual_frame(self, result: CaseResult, time_value: float) -> VisualizationFrame:
+        time_dir = self._ensure_visualization_files(result, time_value)
+        return load_visualization_frame(result.case_dir, time_value, self.settings())
+
+    def _ensure_visualization_files(self, result: CaseResult, time_value: float) -> Path | None:
+        time_dirs = case_time_dirs(result.case_dir)
+        time_dir = next((path for value, path in time_dirs if value == time_value), None)
+        if time_dir is None:
+            return None
+        positions_path = time_dir / "lagrangian" / "moleculeCloud" / "positions"
+        id_path = time_dir / "lagrangian" / "moleculeCloud" / "id"
+        if positions_path.is_file() and id_path.is_file():
+            return time_dir
+
+        remote_case = read_remote_case_from_manifest(result.case_dir)
+        if remote_case is None:
+            return time_dir
+
+        profile = self._remote_profile()
+        if self.remote_browser_connection is not None and self.remote_browser_connection.sftp is not None:
+            sync_remote_lagrangian_time(
+                self.remote_browser_connection.sftp,
+                profile,
+                remote_case,
+                result.case_dir,
+                time_dir.name,
+                log=self.log,
+            )
+        else:
+            with SshConnection(profile) as connection:
+                sync_remote_lagrangian_time(
+                    connection.sftp,
+                    profile,
+                    remote_case,
+                    result.case_dir,
+                    time_dir.name,
+                    log=self.log,
+                )
+        return time_dir
+
+    def _visual_range_indices(self) -> tuple[int, int]:
+        start = self.visual_range_start_slider.value()
+        end = self.visual_range_end_slider.value()
+        if start > end:
+            start, end = end, start
+        return start, end
+
+    @Slot()
+    def export_visual_png(self) -> None:
+        result = self.current_result()
+        if result is None:
+            QMessageBox.information(self, "ケースなし", "可視化する結果ケースを選択してください。")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "可視化PNGを保存", self._local_dialog_start_dir(), "PNG (*.png)")
+        if not path:
+            return
+        self.visual_plot.save_png(Path(path))
+        self.log(f"可視化PNGを保存しました: {path}")
+
+    @Slot()
+    def export_visual_gif(self) -> None:
+        result = self.current_result()
+        if result is None or not result.rows:
+            QMessageBox.information(self, "ケースなし", "可視化する結果ケースを選択してください。")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "可視化GIFを保存", self._local_dialog_start_dir(), "GIF (*.gif)")
+        if not path:
+            return
+        start, end = self._visual_range_indices()
+        rows = result.rows[start : end + 1]
+        writer = PillowWriter(fps=self.visual_fps_spin.value())
+        try:
+            with writer.saving(self.visual_plot.figure, path, dpi=120):
+                for row in rows:
+                    frame = self._load_visual_frame(result, row.time)
+                    self._draw_visual_frame(frame)
+                    self.visual_plot.canvas.draw()
+                    writer.grab_frame()
+                    QApplication.processEvents()
+            self.log(f"可視化GIFを保存しました: {path}")
+        except Exception as exc:
+            QMessageBox.warning(self, "GIF保存エラー", str(exc))
+            self.log(f"可視化GIF保存に失敗しました: {exc}")
 
     def update_evap_plot(self) -> None:
         labels = [result.case_name for result in self.results if result.evaporation_time is not None]

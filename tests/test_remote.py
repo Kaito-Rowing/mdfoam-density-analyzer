@@ -20,6 +20,7 @@ from mdfoam_analyzer.remote import (
     discover_remote_cases,
     discover_remote_fields_for_cases,
     sync_remote_case,
+    sync_remote_lagrangian_time,
     validate_private_key_path,
 )
 
@@ -85,6 +86,8 @@ def sample_tree() -> dict[str, bytes | None]:
         "/parent/case001/main/constant/polyMesh/neighbour": b"neighbour",
         "/parent/case001/main/0/rhoM_water": b"rho0",
         "/parent/case001/main/1e-10/rhoM_water": b"rho1",
+        "/parent/case001/main/1e-10/lagrangian/moleculeCloud/positions": b"positions",
+        "/parent/case001/main/1e-10/lagrangian/moleculeCloud/id": b"id",
         "/parent/case001/main/notes/readme.txt": b"ignore",
         "/parent/case002/main/processor0/constant/polyMesh/points": b"p",
         "/parent/case002/main/processor0/constant/polyMesh/faces": b"f",
@@ -137,6 +140,27 @@ class RemoteSyncTests(unittest.TestCase):
                 else:
                     os.environ["LOCALAPPDATA"] = old_local_appdata
                 shutil.rmtree(Path(temp_dir), ignore_errors=True)
+
+    def test_sync_lagrangian_time_downloads_positions_and_id(self) -> None:
+        sftp = FakeSftp(sample_tree())
+        profile = RemoteProfile("test", "host", 22, "user", "", "", "/parent")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_case = Path(temp_dir) / "case001"
+            sync_remote_lagrangian_time(
+                sftp,
+                profile,
+                "/parent/case001",
+                local_case,
+                "1e-10",
+            )
+            self.assertEqual(
+                (local_case / "main" / "1e-10" / "lagrangian" / "moleculeCloud" / "positions").read_bytes(),
+                b"positions",
+            )
+            self.assertEqual(
+                (local_case / "main" / "1e-10" / "lagrangian" / "moleculeCloud" / "id").read_bytes(),
+                b"id",
+            )
 
 
 if __name__ == "__main__":
