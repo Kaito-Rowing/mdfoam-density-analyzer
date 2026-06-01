@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import csv
+import math
+
+import numpy as np
 
 from .openfoam import (
     MeshVolumeInfo,
@@ -26,6 +29,9 @@ class AnalysisSettings:
     dx: float | None = None
     dy: float | None = None
     dz: float | None = None
+    contact_fit_lower: float = 0.5
+    contact_fit_upper: float = 1.0
+    contact_unwrap_xy: bool = True
 
     def fallback_cell_volume(self) -> float | None:
         if self.manual_cell_volume and self.manual_cell_volume > 0:
@@ -42,6 +48,9 @@ class TimeResult:
     equivalent_radius: float
     selected_cell_count: int
     total_cell_count: int
+    contact_angle_deg: float | None = None
+    contact_radius: float | None = None
+    contact_fit_point_count: int = 0
 
 
 @dataclass
@@ -67,6 +76,28 @@ class CaseResult:
     @property
     def final_volume(self) -> float:
         return self.rows[-1].volume if self.rows else 0.0
+
+    @property
+    def initial_contact_angle_deg(self) -> float | None:
+        return self.rows[0].contact_angle_deg if self.rows else None
+
+    @property
+    def final_valid_contact_angle_deg(self) -> float | None:
+        for row in reversed(self.rows):
+            if row.contact_angle_deg is not None:
+                return row.contact_angle_deg
+        return None
+
+    @property
+    def initial_contact_radius(self) -> float | None:
+        return self.rows[0].contact_radius if self.rows else None
+
+    @property
+    def final_valid_contact_radius(self) -> float | None:
+        for row in reversed(self.rows):
+            if row.contact_radius is not None:
+                return row.contact_radius
+        return None
 
 
 def discover_cases(parent: Path) -> list[Path]:
@@ -164,7 +195,16 @@ def _analyze_reconstructed(
         if stop_requested():
             break
         densities = read_scalar_internal_field(time_dir / settings.density_field)
-        rows.append(_volume_for_time(time_value, densities, mesh_info.volumes, settings))
+        rows.append(
+            _volume_for_time(
+                time_value,
+                densities,
+                mesh_info.volumes,
+                settings,
+                mesh_info.cell_centers,
+                mesh_info.point_bounds,
+            )
+        )
     log(f"{main_dir.parent.name}: 再構成済み時刻フィールド={len(rows)}")
     return rows, mesh_info, field_info.field_class or ""
 
@@ -212,16 +252,43 @@ def _analyze_processors(
         volume = 0.0
         selected = 0
         total = 0
+        selected_centers: list[tuple[float, float, float]] = []
+        point_bounds = _combined_point_bounds(
+            mesh_info.point_bounds for _, _, mesh_info in proc_data
+        )
         for _, time_dirs, mesh_info in proc_data:
             time_dir = time_dirs.get(time_value)
             if not time_dir:
                 continue
             densities = read_scalar_internal_field(time_dir / settings.density_field)
-            row = _volume_for_time(time_value, densities, mesh_info.volumes, settings)
-            volume += row.volume
-            selected += row.selected_cell_count
-            total += row.total_cell_count
-        rows.append(TimeResult(time_value, volume, equivalent_radius(volume), selected, total))
+            stats = _selected_volume_stats(
+                densities,
+                mesh_info.volumes,
+                settings,
+                mesh_info.cell_centers,
+            )
+            volume += stats.volume
+            selected += stats.selected_count
+            total += stats.total_count
+            if stats.selected_centers:
+                selected_centers.extend(stats.selected_centers)
+        contact_angle, contact_radius, fit_count = _contact_metrics(
+            selected_centers,
+            point_bounds,
+            settings,
+        )
+        rows.append(
+            TimeResult(
+                time_value,
+                volume,
+                equivalent_radius(volume),
+                selected,
+                total,
+                contact_angle,
+                contact_radius,
+                fit_count,
+            )
+        )
 
     log(f"{main_dir.parent.name}: processor分割時刻フィールド={len(rows)}")
     return rows, f"{len(proc_data)} processor meshes", field_class
@@ -265,32 +332,214 @@ def _volume_mode_label(mesh_info: MeshVolumeInfo) -> str:
     return f"mesh per-cell volumes ({mesh_info.unique_volume_count} unique)"
 
 
+@dataclass(frozen=True)
+class _SelectedVolumeStats:
+    volume: float
+    selected_count: int
+    total_count: int
+    selected_centers: list[tuple[float, float, float]] | None
+
+
 def _volume_for_time(
     time_value: float,
     densities: list[float],
     cell_volumes: list[float],
     settings: AnalysisSettings,
+    cell_centers: list[tuple[float, float, float]] | None = None,
+    point_bounds: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] | None = None,
 ) -> TimeResult:
-    if len(densities) == 1 and len(cell_volumes) != 1:
-        densities = densities * len(cell_volumes)
-    if len(densities) != len(cell_volumes):
+    stats = _selected_volume_stats(densities, cell_volumes, settings, cell_centers)
+    contact_angle, contact_radius, fit_count = _contact_metrics(
+        stats.selected_centers,
+        point_bounds,
+        settings,
+    )
+    return TimeResult(
+        time=time_value,
+        volume=stats.volume,
+        equivalent_radius=equivalent_radius(stats.volume),
+        selected_cell_count=stats.selected_count,
+        total_cell_count=stats.total_count,
+        contact_angle_deg=contact_angle,
+        contact_radius=contact_radius,
+        contact_fit_point_count=fit_count,
+    )
+
+
+def _selected_volume_stats(
+    densities: list[float],
+    cell_volumes: list[float],
+    settings: AnalysisSettings,
+    cell_centers: list[tuple[float, float, float]] | None = None,
+) -> _SelectedVolumeStats:
+    densities = _expanded_densities(densities, len(cell_volumes))
+    if cell_centers is not None and len(cell_centers) != len(cell_volumes):
         raise OpenFoamParseError(
-            f"Density count {len(densities)} does not match cell volume count {len(cell_volumes)}"
+            f"Cell center count {len(cell_centers)} does not match cell volume count {len(cell_volumes)}"
         )
 
+    selected_centers: list[tuple[float, float, float]] | None
+    selected_centers = [] if cell_centers is not None else None
     selected_volume = 0.0
     selected_count = 0
-    for density, cell_volume in zip(densities, cell_volumes):
+    for cell_index, (density, cell_volume) in enumerate(zip(densities, cell_volumes)):
         if density >= settings.density_threshold:
             selected_volume += cell_volume
             selected_count += 1
-    return TimeResult(
-        time=time_value,
+            if selected_centers is not None and cell_centers is not None:
+                selected_centers.append(cell_centers[cell_index])
+    return _SelectedVolumeStats(
         volume=selected_volume,
-        equivalent_radius=equivalent_radius(selected_volume),
-        selected_cell_count=selected_count,
-        total_cell_count=len(cell_volumes),
+        selected_count=selected_count,
+        total_count=len(cell_volumes),
+        selected_centers=selected_centers,
     )
+
+
+def _expanded_densities(densities: list[float], cell_count: int) -> list[float]:
+    if len(densities) == 1 and cell_count != 1:
+        return densities * cell_count
+    if len(densities) != cell_count:
+        raise OpenFoamParseError(
+            f"Density count {len(densities)} does not match cell volume count {cell_count}"
+        )
+    return densities
+
+
+def _combined_point_bounds(
+    bounds_list,
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None:
+    valid_bounds = [bounds for bounds in bounds_list if bounds is not None]
+    if not valid_bounds:
+        return None
+    return tuple(
+        (
+            min(bounds[axis][0] for bounds in valid_bounds),
+            max(bounds[axis][1] for bounds in valid_bounds),
+        )
+        for axis in range(3)
+    )
+
+
+def _contact_metrics(
+    selected_centers: list[tuple[float, float, float]] | None,
+    point_bounds: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] | None,
+    settings: AnalysisSettings,
+) -> tuple[float | None, float | None, int]:
+    if not selected_centers or len(selected_centers) < 4:
+        return None, None, 0
+
+    points = np.asarray(selected_centers, dtype=float)
+    if settings.contact_unwrap_xy and point_bounds is not None:
+        points = _unwrap_xy(points, point_bounds)
+
+    z_values = points[:, 2]
+    z_min = float(np.min(z_values))
+    z_max = float(np.max(z_values))
+    z_height = z_max - z_min
+    if z_height <= 0.0:
+        return None, None, 0
+
+    z_base_threshold = z_min + 0.05 * z_height
+    base_z = z_values[z_values <= z_base_threshold]
+    z_base = float(np.mean(base_z)) if len(base_z) > 0 else z_min
+
+    fit_lower, fit_upper = _normalized_fit_range(settings)
+    z_fit_lower = z_min + fit_lower * z_height
+    z_fit_upper = z_min + fit_upper * z_height
+    fit_mask = (z_values >= z_fit_lower) & (z_values <= z_fit_upper)
+    fit_count = int(np.count_nonzero(fit_mask))
+    if fit_count < 4:
+        return None, None, fit_count
+
+    sphere = _fit_sphere_algebraic(points[fit_mask])
+    if sphere is None:
+        return None, None, fit_count
+
+    _, _, z_center, radius = sphere
+    if radius < 1.0e-12:
+        return None, None, fit_count
+
+    cos_arg = (z_base - z_center) / radius
+    cos_arg = max(-1.0, min(1.0, cos_arg))
+    theta_rad = math.acos(cos_arg)
+    contact_angle_deg = math.degrees(theta_rad)
+    contact_radius = radius * math.sin(theta_rad)
+    return contact_angle_deg, contact_radius, fit_count
+
+
+def _normalized_fit_range(settings: AnalysisSettings) -> tuple[float, float]:
+    lower = max(0.0, min(1.0, settings.contact_fit_lower))
+    upper = max(0.0, min(1.0, settings.contact_fit_upper))
+    if lower > upper:
+        lower, upper = upper, lower
+    return lower, upper
+
+
+def _fit_sphere_algebraic(
+    points: np.ndarray,
+) -> tuple[float, float, float, float] | None:
+    if len(points) < 4:
+        return None
+    try:
+        x_values = points[:, 0]
+        y_values = points[:, 1]
+        z_values = points[:, 2]
+        matrix = np.c_[x_values, y_values, z_values, np.ones(len(points))]
+        vector = -(x_values**2 + y_values**2 + z_values**2)
+        coefficients, *_ = np.linalg.lstsq(matrix, vector, rcond=None)
+        d_value, e_value, f_value, g_value = coefficients
+        x_center = float(-d_value / 2.0)
+        y_center = float(-e_value / 2.0)
+        z_center = float(-f_value / 2.0)
+        radius_term = x_center**2 + y_center**2 + z_center**2 - float(g_value)
+        if not math.isfinite(radius_term):
+            return None
+        radius = math.sqrt(max(0.0, radius_term))
+        return x_center, y_center, z_center, radius
+    except Exception:
+        return None
+
+
+def _unwrap_xy(
+    points: np.ndarray,
+    point_bounds: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ],
+) -> np.ndarray:
+    unwrapped = points.copy()
+    for axis in (0, 1):
+        minimum, maximum = point_bounds[axis]
+        period = maximum - minimum
+        if period <= 0.0:
+            continue
+        center = _circular_mean(unwrapped[:, axis], minimum, period)
+        unwrapped[:, axis] = center + (
+            (unwrapped[:, axis] - center + period / 2.0) % period - period / 2.0
+        )
+    return unwrapped
+
+
+def _circular_mean(values: np.ndarray, minimum: float, period: float) -> float:
+    angles = 2.0 * math.pi * ((values - minimum) % period) / period
+    sin_mean = float(np.mean(np.sin(angles)))
+    cos_mean = float(np.mean(np.cos(angles)))
+    if abs(sin_mean) + abs(cos_mean) < 1.0e-12:
+        return float(np.mean(values))
+    angle = math.atan2(sin_mean, cos_mean)
+    if angle < 0.0:
+        angle += 2.0 * math.pi
+    return minimum + period * angle / (2.0 * math.pi)
 
 
 def find_evaporation_time(
@@ -327,6 +576,10 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                 "max_volume",
                 "final_volume",
                 "evaporation_time",
+                "initial_contact_angle_deg",
+                "final_valid_contact_angle_deg",
+                "initial_contact_radius",
+                "final_valid_contact_radius",
                 "mesh_source",
                 "volume_mode",
                 "field_class",
@@ -342,6 +595,10 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                     result.max_volume,
                     result.final_volume,
                     "" if result.evaporation_time is None else result.evaporation_time,
+                    _csv_optional(result.initial_contact_angle_deg),
+                    _csv_optional(result.final_valid_contact_angle_deg),
+                    _csv_optional(result.initial_contact_radius),
+                    _csv_optional(result.final_valid_contact_radius),
                     result.mesh_source,
                     result.volume_mode,
                     result.field_class,
@@ -361,6 +618,9 @@ def write_timeseries_csv(path: Path, results: list[CaseResult]) -> None:
                 "equivalent_radius",
                 "selected_cell_count",
                 "total_cell_count",
+                "contact_angle_deg",
+                "contact_radius",
+                "contact_fit_point_count",
             ]
         )
         for result in results:
@@ -373,5 +633,12 @@ def write_timeseries_csv(path: Path, results: list[CaseResult]) -> None:
                         row.equivalent_radius,
                         row.selected_cell_count,
                         row.total_cell_count,
+                        _csv_optional(row.contact_angle_deg),
+                        _csv_optional(row.contact_radius),
+                        row.contact_fit_point_count,
                     ]
                 )
+
+
+def _csv_optional(value: float | None) -> float | str:
+    return "" if value is None else value

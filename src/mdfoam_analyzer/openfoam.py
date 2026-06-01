@@ -37,6 +37,12 @@ class MeshVolumeInfo:
     min_volume: float
     max_volume: float
     total_volume: float
+    cell_centers: list[tuple[float, float, float]] | None = None
+    point_bounds: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] | None = None
 
 
 def strip_comments(text: str) -> str:
@@ -149,17 +155,24 @@ def read_mesh_volumes(poly_mesh_dir: Path) -> MeshVolumeInfo:
 
     cell_count = max(owner + neighbour) + 1 if owner or neighbour else 0
     volumes = [0.0] * cell_count
+    cell_point_ids: list[set[int]] = [set() for _ in range(cell_count)]
     for face_index, face in enumerate(faces):
         center, area_vector = _face_center_area_vector(face, points)
         contribution = _dot(center, area_vector) / 3.0
-        volumes[owner[face_index]] += contribution
+        owner_cell = owner[face_index]
+        volumes[owner_cell] += contribution
+        cell_point_ids[owner_cell].update(face)
         if face_index < len(neighbour):
-            volumes[neighbour[face_index]] -= contribution
+            neighbour_cell = neighbour[face_index]
+            volumes[neighbour_cell] -= contribution
+            cell_point_ids[neighbour_cell].update(face)
 
     abs_volumes = [abs(value) for value in volumes]
     if not abs_volumes:
         raise OpenFoamParseError(f"No cell volumes could be computed from {poly_mesh_dir}")
 
+    cell_centers = [_cell_center(point_ids, points) for point_ids in cell_point_ids]
+    point_bounds = _point_bounds(points)
     min_volume = min(abs_volumes)
     max_volume = max(abs_volumes)
     tolerance = max(max_volume * 1e-9, 1e-300)
@@ -172,6 +185,27 @@ def read_mesh_volumes(poly_mesh_dir: Path) -> MeshVolumeInfo:
         min_volume=min_volume,
         max_volume=max_volume,
         total_volume=sum(abs_volumes),
+        cell_centers=cell_centers,
+        point_bounds=point_bounds,
+    )
+
+
+def _cell_center(
+    point_ids: set[int],
+    points: list[tuple[float, float, float]],
+) -> tuple[float, float, float]:
+    if not point_ids:
+        return (0.0, 0.0, 0.0)
+    coords = [points[index] for index in point_ids]
+    return tuple(sum(point[axis] for point in coords) / len(coords) for axis in range(3))
+
+
+def _point_bounds(
+    points: list[tuple[float, float, float]],
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    return tuple(
+        (min(point[axis] for point in points), max(point[axis] for point in points))
+        for axis in range(3)
     )
 
 

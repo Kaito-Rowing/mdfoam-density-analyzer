@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 import sys
 import traceback
@@ -8,22 +10,26 @@ from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
-    QGridLayout,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QScrollArea,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -36,6 +42,7 @@ from PySide6.QtGui import QKeySequence
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib import rcParams
 
 from .analysis import (
     AnalysisSettings,
@@ -46,6 +53,24 @@ from .analysis import (
     write_summary_csv,
     write_timeseries_csv,
 )
+from .cache import clear_cache
+from .remote import (
+    RemoteError,
+    RemoteProfile,
+    SshConnection,
+    discover_remote_cases,
+    discover_remote_fields_for_cases,
+    list_remote_dirs,
+    normalize_remote_path,
+    remote_join,
+    remote_name,
+    sync_remote_case,
+    validate_private_key_path,
+)
+
+
+rcParams["font.family"] = ["Yu Gothic", "Meiryo", "MS Gothic", "DejaVu Sans"]
+rcParams["axes.unicode_minus"] = False
 
 
 class ScientificDoubleSpinBox(QDoubleSpinBox):
@@ -102,15 +127,25 @@ class AnalyzerWorker(QObject):
     case_finished = Signal(object)
     finished = Signal()
 
-    def __init__(self, cases: list[Path], settings: AnalysisSettings) -> None:
+    def __init__(
+        self,
+        cases: list[Path] | list[str],
+        settings: AnalysisSettings,
+        remote_profile: RemoteProfile | None = None,
+    ) -> None:
         super().__init__()
         self.cases = cases
         self.settings = settings
+        self.remote_profile = remote_profile
         self._stop_requested = False
 
     @Slot()
     def run(self) -> None:
         try:
+            if self.remote_profile is not None:
+                self._run_remote()
+                return
+
             total = len(self.cases)
             for index, case in enumerate(self.cases, start=1):
                 if self._stop_requested:
@@ -129,6 +164,48 @@ class AnalyzerWorker(QObject):
             self.log.emit(traceback.format_exc())
         finally:
             self.finished.emit()
+
+    def _run_remote(self) -> None:
+        profile = self.remote_profile
+        if profile is None:
+            return
+        total = len(self.cases)
+        with SshConnection(profile) as connection:
+            sftp = connection.sftp
+            for index, case in enumerate(self.cases, start=1):
+                if self._stop_requested:
+                    self.log.emit("残りのケースを解析せずに停止しました。")
+                    break
+                remote_case = str(case)
+                self.log.emit(f"{remote_name(remote_case)} をSFTP同期中...")
+                try:
+                    local_case = sync_remote_case(
+                        sftp,
+                        profile,
+                        remote_case,
+                        self.settings.density_field,
+                        stop_requested=lambda: self._stop_requested,
+                        log=self.log.emit,
+                    )
+                    if self._stop_requested:
+                        self.progress.emit(index, total)
+                        break
+                    self.log.emit(f"{remote_name(remote_case)} を解析中...")
+                    result = analyze_case(
+                        local_case,
+                        self.settings,
+                        stop_requested=lambda: self._stop_requested,
+                        log=self.log.emit,
+                    )
+                except Exception as exc:
+                    result = CaseResult(
+                        case_name=remote_name(remote_case),
+                        case_dir=Path(),
+                        status="error",
+                        error=str(exc),
+                    )
+                self.case_finished.emit(result)
+                self.progress.emit(index, total)
 
     @Slot()
     def stop(self) -> None:
@@ -176,18 +253,78 @@ class PlotWidget(QWidget):
         self.figure.savefig(path, dpi=180)
 
 
+APP_SETTINGS_DIR = (
+    Path(os.environ["APPDATA"]) / "mdfoam-density-analyzer"
+    if os.environ.get("APPDATA")
+    else Path.home() / ".mdfoam-density-analyzer"
+)
+PROFILE_PATH = APP_SETTINGS_DIR / "ssh_profile.json"
+KEYRING_SERVICE = "mdfoam-density-analyzer"
+
+
+def _load_profile_settings() -> dict[str, object]:
+    if not PROFILE_PATH.is_file():
+        return {}
+    try:
+        return json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_profile_settings(settings: dict[str, object]) -> None:
+    APP_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+    PROFILE_PATH.write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _secret_key(profile_name: str, host: str, username: str) -> str:
+    return f"{profile_name or 'default'}:{username}@{host}"
+
+
+def _read_saved_secret(profile_name: str, host: str, username: str) -> str:
+    if not host or not username:
+        return ""
+    try:
+        import keyring
+
+        return keyring.get_password(KEYRING_SERVICE, _secret_key(profile_name, host, username)) or ""
+    except Exception:
+        return ""
+
+
+def _save_secret(profile_name: str, host: str, username: str, secret: str) -> str | None:
+    if not host or not username or not secret:
+        return None
+    try:
+        import keyring
+
+        keyring.set_password(KEYRING_SERVICE, _secret_key(profile_name, host, username), secret)
+        return None
+    except Exception as exc:
+        return f"資格情報の保存に失敗しました: {exc}"
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("mdFOAM 密度解析アプリ")
-        self.resize(1300, 820)
+        self.resize(1360, 900)
 
         self.cases: list[Path] = []
+        self.local_folder_path = Path.cwd()
+        self.remote_cases: list[str] = []
+        self.loaded_source = ""
+        self.remote_browser_connection: SshConnection | None = None
+        self.remote_browser_path = ""
         self.results: list[CaseResult] = []
         self.worker: AnalyzerWorker | None = None
         self.thread: QThread | None = None
 
         self._build_ui()
+        self._load_ssh_profile()
+        self._set_source_mode("ローカル")
         self._connect_signals()
         self.folder_edit.setText(str(Path.cwd()))
         self.load_folder(Path.cwd())
@@ -197,92 +334,198 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         root_layout = QVBoxLayout(root)
 
-        top_row = QHBoxLayout()
+        self.workflow_tabs = QTabWidget()
+        root_layout.addWidget(self.workflow_tabs, 1)
+
+        input_tab = QWidget()
+        input_layout = QVBoxLayout(input_tab)
+        self.workflow_tabs.addTab(input_tab, "入力")
+
+        source_group = QGroupBox("入力元")
+        source_layout = QVBoxLayout(source_group)
+        source_row = QHBoxLayout()
+        self.source_combo = QComboBox()
+        self.source_combo.addItems(["ローカル", "SSH"])
         self.folder_edit = QLabel()
         self.folder_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.browse_button = QPushButton("フォルダ選択...")
         self.refresh_button = QPushButton("更新")
-        top_row.addWidget(QLabel("親フォルダ:"))
-        top_row.addWidget(self.folder_edit, 1)
-        top_row.addWidget(self.browse_button)
-        top_row.addWidget(self.refresh_button)
-        root_layout.addLayout(top_row)
+        source_row.addWidget(QLabel("入力元"))
+        source_row.addWidget(self.source_combo)
+        source_row.addWidget(QLabel("選択中"))
+        source_row.addWidget(self.folder_edit, 1)
+        source_row.addWidget(self.refresh_button)
+        source_layout.addLayout(source_row)
+        input_layout.addWidget(source_group)
 
-        splitter = QSplitter(Qt.Horizontal)
-        root_layout.addWidget(splitter, 1)
+        self.source_stack = QStackedWidget()
+        input_layout.addWidget(self.source_stack, 2)
 
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        splitter.addWidget(left_panel)
+        local_panel = QWidget()
+        local_layout = QVBoxLayout(local_panel)
+        local_group = QGroupBox("ローカルフォルダ")
+        local_group_layout = QHBoxLayout(local_group)
+        self.browse_button = QPushButton("フォルダを選択")
+        local_group_layout.addWidget(QLabel("解析対象ケースを含むフォルダを選択します。"))
+        local_group_layout.addStretch(1)
+        local_group_layout.addWidget(self.browse_button)
+        local_layout.addWidget(local_group)
+        local_layout.addStretch(1)
+        self.source_stack.addWidget(local_panel)
+
+        ssh_panel = QWidget()
+        ssh_panel_layout = QVBoxLayout(ssh_panel)
+        ssh_splitter = QSplitter(Qt.Horizontal)
+        ssh_panel_layout.addWidget(ssh_splitter, 1)
+
+        self.ssh_group = QGroupBox("SSH/SFTP接続")
+        ssh_form = QFormLayout(self.ssh_group)
+        ssh_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.profile_edit = QLineEdit()
+        self.host_edit = QLineEdit()
+        self.port_spin = QSpinBox()
+        self.port_spin.setRange(1, 65535)
+        self.port_spin.setValue(22)
+        self.username_edit = QLineEdit()
+        self.key_path_edit = QLineEdit()
+        self.key_browse_button = QPushButton("参照")
+        self.secret_edit = QLineEdit()
+        self.secret_edit.setEchoMode(QLineEdit.Password)
+        self.remote_path_edit = QLineEdit()
+        self.save_credentials_check = QCheckBox("資格情報を保存")
+
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.key_path_edit, 1)
+        key_row.addWidget(self.key_browse_button)
+        ssh_form.addRow("プロファイル", self.profile_edit)
+        ssh_form.addRow("ホスト", self.host_edit)
+        ssh_form.addRow("ポート", self.port_spin)
+        ssh_form.addRow("ユーザー", self.username_edit)
+        ssh_form.addRow("OpenSSH秘密鍵", key_row)
+        ssh_form.addRow("パスフレーズ/パスワード", self.secret_edit)
+        ssh_form.addRow("リモートパス", self.remote_path_edit)
+        ssh_form.addRow("", self.save_credentials_check)
+        ssh_splitter.addWidget(self.ssh_group)
+
+        browser_group = QGroupBox("リモートフォルダ")
+        browser_layout = QVBoxLayout(browser_group)
+        browser_button_row = QHBoxLayout()
+        self.connect_remote_button = QPushButton("接続/更新")
+        self.remote_up_button = QPushButton("上へ")
+        self.remote_open_button = QPushButton("開く")
+        self.remote_select_button = QPushButton("このフォルダを選択")
+        self.clear_cache_button = QPushButton("キャッシュ削除")
+        browser_button_row.addWidget(self.connect_remote_button)
+        browser_button_row.addWidget(self.remote_up_button)
+        browser_button_row.addWidget(self.remote_open_button)
+        browser_button_row.addWidget(self.remote_select_button)
+        browser_button_row.addStretch(1)
+        browser_button_row.addWidget(self.clear_cache_button)
+        browser_layout.addLayout(browser_button_row)
+        self.remote_dir_list = QListWidget()
+        self.remote_dir_list.setMinimumHeight(240)
+        browser_layout.addWidget(self.remote_dir_list, 1)
+        ssh_splitter.addWidget(browser_group)
+        ssh_splitter.setStretchFactor(0, 1)
+        ssh_splitter.setStretchFactor(1, 2)
+        self.source_stack.addWidget(ssh_panel)
+
+        case_group = QGroupBox("ケース一覧")
+        case_layout = QVBoxLayout(case_group)
 
         self.case_list = QListWidget()
         self.case_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        left_layout.addWidget(QLabel("ケース一覧"))
-        left_layout.addWidget(self.case_list, 1)
+        case_layout.addWidget(self.case_list, 1)
+        input_layout.addWidget(case_group, 3)
 
-        settings_group = QGroupBox("解析設定")
-        settings_layout = QGridLayout(settings_group)
+        settings_tab = QWidget()
+        settings_tab_layout = QVBoxLayout(settings_tab)
+        self.workflow_tabs.addTab(settings_tab, "解析設定")
+
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_content = QWidget()
+        settings_content_layout = QVBoxLayout(settings_content)
+        settings_scroll.setWidget(settings_content)
+        settings_tab_layout.addWidget(settings_scroll, 1)
+
+        basic_group = QGroupBox("基本設定")
+        basic_layout = QFormLayout(basic_group)
+        basic_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.field_combo = QComboBox()
+        self.field_combo.setMinimumWidth(260)
         self.threshold_spin = self._scientific_spin(500.0)
         self.zero_spin = self._scientific_spin(0.0)
         self.zero_count_spin = QSpinBox()
         self.zero_count_spin.setRange(1, 999)
         self.zero_count_spin.setValue(3)
+        basic_layout.addRow("密度フィールド", self.field_combo)
+        basic_layout.addRow("密度しきい値", self.threshold_spin)
+        basic_layout.addRow("0判定許容値", self.zero_spin)
+        basic_layout.addRow("連続ゼロ数", self.zero_count_spin)
+        settings_content_layout.addWidget(basic_group)
+
+        advanced_group = QGroupBox("詳細設定")
+        advanced_layout = QFormLayout(advanced_group)
+        advanced_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.cell_volume_spin = self._scientific_spin(0.0)
         self.dx_spin = self._scientific_spin(0.0)
         self.dy_spin = self._scientific_spin(0.0)
         self.dz_spin = self._scientific_spin(0.0)
+        self.contact_fit_lower_spin = self._fraction_spin(0.5)
+        self.contact_fit_upper_spin = self._fraction_spin(1.0)
+        self.contact_unwrap_check = QCheckBox("有効")
+        self.contact_unwrap_check.setChecked(True)
+        advanced_layout.addRow("セル体積 fallback", self.cell_volume_spin)
+        advanced_layout.addRow("dx fallback", self.dx_spin)
+        advanced_layout.addRow("dy fallback", self.dy_spin)
+        advanced_layout.addRow("dz fallback", self.dz_spin)
+        advanced_layout.addRow("接触角fit下限", self.contact_fit_lower_spin)
+        advanced_layout.addRow("接触角fit上限", self.contact_fit_upper_spin)
+        advanced_layout.addRow("xy周期補正", self.contact_unwrap_check)
+        settings_content_layout.addWidget(advanced_group)
+        settings_content_layout.addStretch(1)
 
-        settings_layout.addWidget(QLabel("密度フィールド"), 0, 0)
-        settings_layout.addWidget(self.field_combo, 0, 1)
-        settings_layout.addWidget(QLabel("密度しきい値"), 1, 0)
-        settings_layout.addWidget(self.threshold_spin, 1, 1)
-        settings_layout.addWidget(QLabel("0判定許容値"), 2, 0)
-        settings_layout.addWidget(self.zero_spin, 2, 1)
-        settings_layout.addWidget(QLabel("連続ゼロ数"), 3, 0)
-        settings_layout.addWidget(self.zero_count_spin, 3, 1)
-        settings_layout.addWidget(QLabel("セル体積"), 4, 0)
-        settings_layout.addWidget(self.cell_volume_spin, 4, 1)
-        settings_layout.addWidget(QLabel("dx"), 5, 0)
-        settings_layout.addWidget(self.dx_spin, 5, 1)
-        settings_layout.addWidget(QLabel("dy"), 6, 0)
-        settings_layout.addWidget(self.dy_spin, 6, 1)
-        settings_layout.addWidget(QLabel("dz"), 7, 0)
-        settings_layout.addWidget(self.dz_spin, 7, 1)
-        left_layout.addWidget(settings_group)
-
+        run_group = QGroupBox("実行")
+        run_layout = QVBoxLayout(run_group)
         button_row = QHBoxLayout()
         self.run_button = QPushButton("解析実行")
         self.stop_button = QPushButton("停止")
         self.stop_button.setEnabled(False)
         button_row.addWidget(self.run_button)
         button_row.addWidget(self.stop_button)
-        left_layout.addLayout(button_row)
+        button_row.addStretch(1)
+        run_layout.addLayout(button_row)
+        self.progress = QProgressBar()
+        run_layout.addWidget(self.progress)
+        settings_tab_layout.addWidget(run_group)
+
+        results_tab = QWidget()
+        results_layout = QVBoxLayout(results_tab)
+        self.workflow_tabs.addTab(results_tab, "結果")
 
         export_row = QHBoxLayout()
         self.export_csv_button = QPushButton("CSV出力")
         self.export_png_button = QPushButton("PNG出力")
+        export_row.addStretch(1)
         export_row.addWidget(self.export_csv_button)
         export_row.addWidget(self.export_png_button)
-        left_layout.addLayout(export_row)
+        results_layout.addLayout(export_row)
 
-        self.progress = QProgressBar()
-        left_layout.addWidget(self.progress)
-
-        self.log_box = QTextEdit()
-        self.log_box.setReadOnly(True)
-        left_layout.addWidget(QLabel("ログ"))
-        left_layout.addWidget(self.log_box, 1)
-
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-
-        self.table = ResultsTable(0, 7)
+        self.table = ResultsTable(0, 11)
         self.table.setHorizontalHeaderLabels(
-            ["ケース", "時刻数", "最大体積", "最終体積", "蒸発完了時刻", "状態", "エラー"]
+            [
+                "ケース",
+                "時刻数",
+                "最大体積",
+                "最終体積",
+                "蒸発完了時刻",
+                "初期接触角",
+                "最終有効接触角",
+                "初期接触半径",
+                "最終有効接触半径",
+                "状態",
+                "エラー",
+            ]
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -308,23 +551,49 @@ class MainWindow(QMainWindow):
             }
             """
         )
-        right_layout.addWidget(self.table, 1)
 
         self.tabs = QTabWidget()
         self.volume_plot = PlotWidget()
         self.radius_plot = PlotWidget()
+        self.contact_angle_plot = PlotWidget()
+        self.contact_radius_plot = PlotWidget()
         self.evap_plot = PlotWidget()
         self.tabs.addTab(self.volume_plot, "体積-時間")
         self.tabs.addTab(self.radius_plot, "等価半径-時間")
+        self.tabs.addTab(self.contact_angle_plot, "接触角-時間")
+        self.tabs.addTab(self.contact_radius_plot, "接触半径-時間")
         self.tabs.addTab(self.evap_plot, "蒸発完了時刻")
-        right_layout.addWidget(self.tabs, 2)
+        results_splitter = QSplitter(Qt.Vertical)
+        results_splitter.addWidget(self.table)
+        results_splitter.addWidget(self.tabs)
+        results_splitter.setStretchFactor(0, 1)
+        results_splitter.setStretchFactor(1, 2)
+        results_layout.addWidget(results_splitter, 1)
         self.volume_plot.clear("体積-時間")
         self.radius_plot.clear("等価半径-時間")
+        self.contact_angle_plot.clear("接触角-時間")
+        self.contact_radius_plot.clear("接触半径-時間")
         self.evap_plot.clear("蒸発完了時刻")
 
+        log_group = QGroupBox("ログ")
+        log_layout = QVBoxLayout(log_group)
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setMaximumHeight(140)
+        log_layout.addWidget(self.log_box)
+        root_layout.addWidget(log_group)
+
     def _connect_signals(self) -> None:
+        self.source_combo.currentTextChanged.connect(self._set_source_mode)
         self.browse_button.clicked.connect(self.choose_folder)
-        self.refresh_button.clicked.connect(lambda: self.load_folder(Path(self.folder_edit.text())))
+        self.refresh_button.clicked.connect(self.refresh_source)
+        self.key_browse_button.clicked.connect(self.choose_private_key)
+        self.connect_remote_button.clicked.connect(self.connect_remote_browser)
+        self.remote_up_button.clicked.connect(self.remote_go_parent)
+        self.remote_open_button.clicked.connect(self.remote_open_selected)
+        self.remote_dir_list.itemDoubleClicked.connect(lambda _: self.remote_open_selected())
+        self.remote_select_button.clicked.connect(self.remote_select_current)
+        self.clear_cache_button.clicked.connect(self.clear_remote_cache)
         self.run_button.clicked.connect(self.start_analysis)
         self.stop_button.clicked.connect(self.stop_analysis)
         self.export_csv_button.clicked.connect(self.export_csv)
@@ -349,18 +618,194 @@ class MainWindow(QMainWindow):
         spin.setValue(value)
         return spin
 
+    def _fraction_spin(self, value: float) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setDecimals(3)
+        spin.setRange(0.0, 1.0)
+        spin.setSingleStep(0.05)
+        spin.setValue(value)
+        return spin
+
+    @Slot(str)
+    def _set_source_mode(self, mode: str) -> None:
+        is_remote = mode == "SSH"
+        self.source_stack.setCurrentIndex(1 if is_remote else 0)
+        if is_remote:
+            self.folder_edit.setText(self.remote_path_edit.text())
+            if self.loaded_source != "SSH":
+                self._clear_loaded_cases()
+        else:
+            self.folder_edit.setText(str(self.local_folder_path))
+            if self.loaded_source not in ("", "ローカル"):
+                self.load_folder(self.local_folder_path)
+
+    def _clear_loaded_cases(self) -> None:
+        self.case_list.clear()
+        self.field_combo.clear()
+        self.field_combo.addItem("rhoM_water")
+        self.results.clear()
+        self.table.setRowCount(0)
+        self.cases = []
+        self.remote_cases = []
+        self.loaded_source = ""
+
+    def _load_ssh_profile(self) -> None:
+        profile = _load_profile_settings()
+        self.profile_edit.setText(str(profile.get("name", "default")))
+        self.host_edit.setText(str(profile.get("host", "")))
+        self.port_spin.setValue(int(profile.get("port", 22) or 22))
+        self.username_edit.setText(str(profile.get("username", "")))
+        self.key_path_edit.setText(str(profile.get("key_path", "")))
+        self.remote_path_edit.setText(str(profile.get("remote_path", "")))
+        self.save_credentials_check.setChecked(bool(profile.get("save_credentials", False)))
+        if self.save_credentials_check.isChecked():
+            self.secret_edit.setText(
+                _read_saved_secret(
+                    self.profile_edit.text(),
+                    self.host_edit.text(),
+                    self.username_edit.text(),
+                )
+            )
+
+    def _save_ssh_profile(self) -> None:
+        profile = {
+            "name": self.profile_edit.text().strip() or "default",
+            "host": self.host_edit.text().strip(),
+            "port": self.port_spin.value(),
+            "username": self.username_edit.text().strip(),
+            "key_path": self.key_path_edit.text().strip(),
+            "remote_path": self.remote_path_edit.text().strip(),
+            "save_credentials": self.save_credentials_check.isChecked(),
+        }
+        _save_profile_settings(profile)
+        if self.save_credentials_check.isChecked():
+            warning = _save_secret(
+                str(profile["name"]),
+                str(profile["host"]),
+                str(profile["username"]),
+                self.secret_edit.text(),
+            )
+            if warning:
+                self.log(warning)
+
+    def _remote_profile(self) -> RemoteProfile:
+        profile = RemoteProfile(
+            name=self.profile_edit.text().strip() or "default",
+            host=self.host_edit.text().strip(),
+            port=self.port_spin.value(),
+            username=self.username_edit.text().strip(),
+            key_path=self.key_path_edit.text().strip(),
+            secret=self.secret_edit.text(),
+            remote_path=normalize_remote_path(self.remote_path_edit.text()),
+        )
+        if not profile.host:
+            raise RemoteError("SSHホストを入力してください。")
+        if not profile.username:
+            raise RemoteError("SSHユーザー名を入力してください。")
+        if not profile.remote_path:
+            raise RemoteError("リモートパスを入力してください。")
+        validate_private_key_path(profile.key_path)
+        return profile
+
+    @Slot()
+    def refresh_source(self) -> None:
+        if self.source_combo.currentText() == "SSH":
+            self.connect_remote_browser()
+        else:
+            self.load_folder(self.local_folder_path)
+
+    @Slot()
+    def choose_private_key(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "OpenSSH秘密鍵を選択", self.key_path_edit.text())
+        if not path:
+            return
+        if path.lower().endswith(".ppk"):
+            QMessageBox.warning(
+                self,
+                "鍵形式の変換が必要です",
+                ".ppk は直接読み込めません。PuTTYgenでOpenSSH形式の秘密鍵に変換してから指定してください。",
+            )
+            return
+        self.key_path_edit.setText(path)
+
+    @Slot()
+    def connect_remote_browser(self) -> None:
+        try:
+            profile = self._remote_profile()
+            self._save_ssh_profile()
+            if self.remote_browser_connection is not None:
+                self.remote_browser_connection.close()
+            self.remote_browser_connection = SshConnection(profile)
+            self.remote_browser_connection.connect()
+            self.remote_browser_path = profile.remote_path
+            self._load_remote_dir(self.remote_browser_path)
+            self.load_remote_folder(self.remote_browser_path)
+            self.log(f"SSH接続しました: {profile.username}@{profile.host}:{self.remote_browser_path}")
+        except Exception as exc:
+            self.log(f"SSH接続/リモート読み込みに失敗しました: {exc}")
+            QMessageBox.warning(self, "SSH接続エラー", str(exc))
+
+    def _load_remote_dir(self, path: str) -> None:
+        if self.remote_browser_connection is None or self.remote_browser_connection.sftp is None:
+            raise RemoteError("SSH接続がありません。")
+        path = normalize_remote_path(path)
+        self.remote_dir_list.clear()
+        for name, full_path in list_remote_dirs(self.remote_browser_connection.sftp, path):
+            item = QListWidgetItem(name)
+            item.setData(Qt.UserRole, full_path)
+            self.remote_dir_list.addItem(item)
+        self.remote_browser_path = path
+        self.remote_path_edit.setText(path)
+        self.folder_edit.setText(path)
+
+    @Slot()
+    def remote_go_parent(self) -> None:
+        try:
+            parent = remote_join(self.remote_browser_path, "..")
+            self._load_remote_dir(parent)
+        except Exception as exc:
+            self.log(f"リモートフォルダを開けません: {exc}")
+
+    @Slot()
+    def remote_open_selected(self) -> None:
+        item = self.remote_dir_list.currentItem()
+        if item is None:
+            return
+        try:
+            self._load_remote_dir(str(item.data(Qt.UserRole)))
+        except Exception as exc:
+            self.log(f"リモートフォルダを開けません: {exc}")
+
+    @Slot()
+    def remote_select_current(self) -> None:
+        try:
+            self.load_remote_folder(self.remote_browser_path)
+        except Exception as exc:
+            self.log(f"リモートケース読み込みに失敗しました: {exc}")
+
+    @Slot()
+    def clear_remote_cache(self) -> None:
+        try:
+            clear_cache()
+            self.log("SSH解析キャッシュを削除しました。")
+        except Exception as exc:
+            self.log(f"キャッシュ削除に失敗しました: {exc}")
+
     @Slot()
     def choose_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "親フォルダを選択", self.folder_edit.text())
+        path = QFileDialog.getExistingDirectory(self, "親フォルダを選択", str(self.local_folder_path))
         if path:
             self.load_folder(Path(path))
 
     def load_folder(self, path: Path) -> None:
+        self.local_folder_path = path
         self.folder_edit.setText(str(path))
         self.case_list.clear()
         self.field_combo.clear()
         self.results.clear()
         self.table.setRowCount(0)
+        self.remote_cases = []
+        self.loaded_source = "ローカル"
         try:
             self.cases = discover_cases(path)
             fields = discover_fields_for_cases(self.cases)
@@ -382,7 +827,44 @@ class MainWindow(QMainWindow):
             self.cases = []
             self.log(f"フォルダ読み込みに失敗しました: {exc}")
 
-    def selected_cases(self) -> list[Path]:
+    def load_remote_folder(self, path: str) -> None:
+        if self.remote_browser_connection is None or self.remote_browser_connection.sftp is None:
+            raise RemoteError("SSH接続がありません。")
+        path = normalize_remote_path(path)
+        self.folder_edit.setText(path)
+        self.remote_path_edit.setText(path)
+        self.case_list.clear()
+        self.field_combo.clear()
+        self.results.clear()
+        self.table.setRowCount(0)
+        self.cases = []
+        self.loaded_source = "SSH"
+        self.remote_cases = discover_remote_cases(self.remote_browser_connection.sftp, path)
+        fields = discover_remote_fields_for_cases(self.remote_browser_connection.sftp, self.remote_cases)
+        if not fields:
+            fields = ["rhoM_water"]
+        self.field_combo.addItems(fields)
+        default_index = self.field_combo.findText("rhoM_water")
+        if default_index >= 0:
+            self.field_combo.setCurrentIndex(default_index)
+        for case in self.remote_cases:
+            item = QListWidgetItem(remote_name(case))
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            item.setData(Qt.UserRole, case)
+            self.case_list.addItem(item)
+        self.log(f"{path} から {len(self.remote_cases)} リモートケースを読み込みました。")
+        self.log(f"密度フィールド: {', '.join(fields)}")
+
+    def selected_cases(self) -> list[Path] | list[str]:
+        if self.source_combo.currentText() == "SSH":
+            remote_cases: list[str] = []
+            for index in range(self.case_list.count()):
+                item = self.case_list.item(index)
+                if item.checkState() == Qt.Checked:
+                    remote_cases.append(str(item.data(Qt.UserRole)))
+            return remote_cases
+
         cases: list[Path] = []
         for index in range(self.case_list.count()):
             item = self.case_list.item(index)
@@ -400,7 +882,15 @@ class MainWindow(QMainWindow):
             dx=self.dx_spin.value() or None,
             dy=self.dy_spin.value() or None,
             dz=self.dz_spin.value() or None,
+            contact_fit_lower=self.contact_fit_lower_spin.value(),
+            contact_fit_upper=self.contact_fit_upper_spin.value(),
+            contact_unwrap_xy=self.contact_unwrap_check.isChecked(),
         )
+
+    def _local_dialog_start_dir(self) -> str:
+        if self.local_folder_path.exists():
+            return str(self.local_folder_path)
+        return str(Path.cwd())
 
     @Slot()
     def start_analysis(self) -> None:
@@ -408,6 +898,14 @@ class MainWindow(QMainWindow):
         if not cases:
             QMessageBox.warning(self, "ケースなし", "少なくとも1つのケースを選択してください。")
             return
+        remote_profile = None
+        if self.source_combo.currentText() == "SSH":
+            try:
+                remote_profile = self._remote_profile()
+                self._save_ssh_profile()
+            except Exception as exc:
+                QMessageBox.warning(self, "SSH設定エラー", str(exc))
+                return
 
         self.results.clear()
         self.table.setRowCount(0)
@@ -416,9 +914,10 @@ class MainWindow(QMainWindow):
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.log("解析を開始しました。")
+        self.workflow_tabs.setCurrentIndex(2)
 
         self.thread = QThread(self)
-        self.worker = AnalyzerWorker(cases, self.settings())
+        self.worker = AnalyzerWorker(cases, self.settings(), remote_profile)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.progress.connect(self.on_progress)
@@ -467,6 +966,10 @@ class MainWindow(QMainWindow):
             _fmt(result.max_volume),
             _fmt(result.final_volume),
             "" if result.evaporation_time is None else _fmt(result.evaporation_time),
+            _fmt_optional(result.initial_contact_angle_deg),
+            _fmt_optional(result.final_valid_contact_angle_deg),
+            _fmt_optional(result.initial_contact_radius),
+            _fmt_optional(result.final_valid_contact_radius),
             _status_label(result.status),
             result.error,
         ]
@@ -498,6 +1001,30 @@ class MainWindow(QMainWindow):
             times,
             radii,
         )
+        angle_points = [
+            (row.time, row.contact_angle_deg)
+            for row in result.rows
+            if row.contact_angle_deg is not None
+        ]
+        radius_points = [
+            (row.time, row.contact_radius)
+            for row in result.rows
+            if row.contact_radius is not None
+        ]
+        self.contact_angle_plot.plot_xy(
+            f"{result.case_name}: 接触角-時間",
+            "時間 [s]",
+            "接触角 [deg]",
+            [point[0] for point in angle_points],
+            [point[1] for point in angle_points],
+        )
+        self.contact_radius_plot.plot_xy(
+            f"{result.case_name}: 接触半径-時間",
+            "時間 [s]",
+            "接触半径 [m]",
+            [point[0] for point in radius_points],
+            [point[1] for point in radius_points],
+        )
 
     def update_evap_plot(self) -> None:
         labels = [result.case_name for result in self.results if result.evaporation_time is not None]
@@ -512,7 +1039,7 @@ class MainWindow(QMainWindow):
         if not self.results:
             QMessageBox.information(self, "結果なし", "出力前に解析を実行してください。")
             return
-        directory = QFileDialog.getExistingDirectory(self, "出力フォルダを選択", self.folder_edit.text())
+        directory = QFileDialog.getExistingDirectory(self, "出力フォルダを選択", self._local_dialog_start_dir())
         if not directory:
             return
         out_dir = Path(directory)
@@ -525,7 +1052,7 @@ class MainWindow(QMainWindow):
         tab = self.tabs.currentWidget()
         if not isinstance(tab, PlotWidget):
             return
-        path, _ = QFileDialog.getSaveFileName(self, "現在のグラフを保存", self.folder_edit.text(), "PNG (*.png)")
+        path, _ = QFileDialog.getSaveFileName(self, "現在のグラフを保存", self._local_dialog_start_dir(), "PNG (*.png)")
         if not path:
             return
         tab.save_png(Path(path))
@@ -535,9 +1062,18 @@ class MainWindow(QMainWindow):
     def log(self, message: str) -> None:
         self.log_box.append(message)
 
+    def closeEvent(self, event) -> None:
+        if self.remote_browser_connection is not None:
+            self.remote_browser_connection.close()
+        super().closeEvent(event)
+
 
 def _fmt(value: float) -> str:
     return f"{value:.8g}"
+
+
+def _fmt_optional(value: float | None) -> str:
+    return "" if value is None else _fmt(value)
 
 
 def _status_label(status: str) -> str:
