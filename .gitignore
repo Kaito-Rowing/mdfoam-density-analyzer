@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+env/
+
+# Local analysis data should stay outside the app repository.
+initial/
+initial_a/
+main/
+processor*/
+AllDisMpi_*
+batch_case.out
+batch_status.txt
+case_info.txt
+log.mapFields
+
+# Local exports
+mdfoam_summary.csv
+mdfoam_timeseries.csv
+*.png
