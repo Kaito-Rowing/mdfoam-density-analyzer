@@ -39,6 +39,22 @@ class VisualizationFrame:
     ] | None
 
 
+@dataclass(frozen=True)
+class PlotBounds:
+    x: tuple[float, float]
+    y: tuple[float, float]
+    z: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class DownsampleResult:
+    positions: np.ndarray
+    ids: np.ndarray | None
+    original_count: int
+    displayed_count: int
+    was_downsampled: bool
+
+
 def case_time_dirs(case_dir: Path) -> list[tuple[float, Path]]:
     main_dir = case_dir / "main"
     return numeric_time_dirs(main_dir)
@@ -153,6 +169,57 @@ def replicate_xy(
     return replicated, replicated_ids
 
 
+def id_draw_order(positions: np.ndarray, ids: np.ndarray | None) -> list[int]:
+    if ids is None or len(positions) == 0:
+        return []
+    means = []
+    for id_value in np.unique(ids):
+        mask = ids == id_value
+        means.append((float(np.mean(positions[mask, 2])), int(id_value)))
+    return [id_value for _, id_value in sorted(means)]
+
+
+def downsample_points_by_id(
+    positions: np.ndarray,
+    ids: np.ndarray | None,
+    max_points: int,
+) -> DownsampleResult:
+    original_count = len(positions)
+    if max_points <= 0 or original_count <= max_points:
+        return DownsampleResult(positions, ids, original_count, original_count, False)
+    if max_points <= 0:
+        return DownsampleResult(positions[:0], ids[:0] if ids is not None else None, original_count, 0, True)
+
+    if ids is None:
+        indices = np.linspace(0, original_count - 1, max_points, dtype=int)
+        return DownsampleResult(positions[indices], None, original_count, len(indices), True)
+
+    selected_parts: list[np.ndarray] = []
+    unique_ids = np.unique(ids)
+    remaining = max_points
+    remaining_count = original_count
+    for index, id_value in enumerate(unique_ids):
+        id_indices = np.flatnonzero(ids == id_value)
+        if index == len(unique_ids) - 1:
+            take = remaining
+        else:
+            take = max(1, int(round(max_points * len(id_indices) / original_count)))
+            take = min(take, remaining - (len(unique_ids) - index - 1))
+        take = min(take, len(id_indices), remaining)
+        remaining -= take
+        remaining_count -= len(id_indices)
+        if take <= 0:
+            continue
+        if take >= len(id_indices):
+            selected_parts.append(id_indices)
+        else:
+            selected_parts.append(id_indices[np.linspace(0, len(id_indices) - 1, take, dtype=int)])
+    if not selected_parts:
+        return DownsampleResult(positions[:0], ids[:0], original_count, 0, True)
+    selected = np.sort(np.concatenate(selected_parts))
+    return DownsampleResult(positions[selected], ids[selected], original_count, len(selected), True)
+
+
 def downsample_points(
     positions: np.ndarray,
     ids: np.ndarray | None,
@@ -162,6 +229,36 @@ def downsample_points(
         return positions, ids
     indices = np.linspace(0, len(positions) - 1, max_points, dtype=int)
     return positions[indices], ids[indices] if ids is not None else None
+
+
+def plot_bounds_from_point_bounds(
+    point_bounds: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] | None,
+    tile_count: int = 1,
+) -> PlotBounds | None:
+    if point_bounds is None:
+        return None
+    tile_count = max(1, min(16, int(tile_count)))
+    x_min, x_max = point_bounds[0]
+    y_min, y_max = point_bounds[1]
+    z_min, z_max = point_bounds[2]
+    x_period = x_max - x_min
+    y_period = y_max - y_min
+    if tile_count > 1 and x_period > 0.0 and y_period > 0.0:
+        start = -(tile_count // 2)
+        end = start + tile_count - 1
+        x_min = x_min + start * x_period
+        x_max = x_max + end * x_period
+        y_min = y_min + start * y_period
+        y_max = y_max + end * y_period
+    return PlotBounds(
+        _pad_range(x_min, x_max),
+        _pad_range(y_min, y_max),
+        _pad_range(z_min, z_max),
+    )
 
 
 def read_remote_case_from_manifest(case_dir: Path) -> str | None:
@@ -192,3 +289,12 @@ def _expanded_densities(densities: list[float], cell_count: int) -> list[float]:
             f"Density count {len(densities)} does not match cell count {cell_count}"
         )
     return densities
+
+
+def _pad_range(minimum: float, maximum: float) -> tuple[float, float]:
+    span = maximum - minimum
+    if span <= 0.0:
+        padding = max(abs(minimum) * 0.05, 1.0e-30)
+    else:
+        padding = span * 0.03
+    return minimum - padding, maximum + padding

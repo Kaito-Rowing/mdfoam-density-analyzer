@@ -72,17 +72,22 @@ from .remote import (
     validate_private_key_path,
 )
 from .visualization import (
+    PlotBounds,
     VisualizationFrame,
     case_time_dirs,
+    downsample_points_by_id,
+    id_draw_order,
     load_visualization_frame,
+    plot_bounds_from_point_bounds,
     read_remote_case_from_manifest,
     replicate_xy,
-    downsample_points,
 )
 
 
 rcParams["font.family"] = ["Yu Gothic", "Meiryo", "MS Gothic", "DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
+
+THREE_D_AUTO_MAX_POINTS = 50_000
 
 
 class ScientificDoubleSpinBox(QDoubleSpinBox):
@@ -144,7 +149,7 @@ class AnalyzerWorker(QObject):
         cases: list[Path] | list[str],
         settings: AnalysisSettings,
         remote_profile: RemoteProfile | None = None,
-    ) -> None:
+    ):
         super().__init__()
         self.cases = cases
         self.settings = settings
@@ -291,28 +296,89 @@ class VisualizationPlotWidget(QWidget):
         point_size: float,
         max_points: int,
         show_legend: bool,
+        show_title: bool,
+        show_axis_labels: bool,
+        show_axis_ticks: bool,
+        show_info_text: bool,
+        show_grid: bool,
         show_liquid: bool,
         show_fit: bool,
     ) -> None:
         self.figure.clear()
+        is_3d = mode.startswith("3D")
         particles = frame.particles.positions
         particle_ids = frame.particles.ids
+        downsample = None
         if periodic_enabled:
-            particles, particle_ids = replicate_xy(
-                particles,
-                frame.point_bounds,
-                tile_count,
-                particle_ids,
-            )
-        particles, particle_ids = downsample_points(particles, particle_ids, max_points)
+            normalized_tile_count = max(1, min(16, int(tile_count)))
+            full_periodic_count = len(particles) * normalized_tile_count * normalized_tile_count
+            if is_3d:
+                effective_max_points = max_points if max_points > 0 else THREE_D_AUTO_MAX_POINTS
+                if effective_max_points > 0 and full_periodic_count > effective_max_points:
+                    tile_total = normalized_tile_count * normalized_tile_count
+                    base_limit = max(1, (effective_max_points + tile_total - 1) // tile_total)
+                    base_downsample = downsample_points_by_id(particles, particle_ids, base_limit)
+                    particles, particle_ids = replicate_xy(
+                        base_downsample.positions,
+                        frame.point_bounds,
+                        normalized_tile_count,
+                        base_downsample.ids,
+                    )
+                    final_downsample = downsample_points_by_id(particles, particle_ids, effective_max_points)
+                    particles = final_downsample.positions
+                    particle_ids = final_downsample.ids
+                    downsample = final_downsample.__class__(
+                        particles,
+                        particle_ids,
+                        full_periodic_count,
+                        len(particles),
+                        True,
+                    )
+                else:
+                    particles, particle_ids = replicate_xy(
+                        particles,
+                        frame.point_bounds,
+                        normalized_tile_count,
+                        particle_ids,
+                    )
+            else:
+                particles, particle_ids = replicate_xy(
+                    particles,
+                    frame.point_bounds,
+                    normalized_tile_count,
+                    particle_ids,
+                )
+        effective_max_points = max_points
+        if is_3d and effective_max_points <= 0:
+            effective_max_points = THREE_D_AUTO_MAX_POINTS
+        if downsample is None:
+            downsample = downsample_points_by_id(particles, particle_ids, effective_max_points)
+            particles = downsample.positions
+            particle_ids = downsample.ids
+        bounds = plot_bounds_from_point_bounds(
+            frame.point_bounds,
+            tile_count if periodic_enabled else 1,
+        )
 
-        if mode.startswith("3D"):
+        if is_3d:
             axis = self.figure.add_subplot(111, projection="3d")
-            self._draw_3d(axis, frame, particles, particle_ids, point_size, show_legend, show_liquid, show_fit)
+            self._draw_3d(axis, frame, particles, particle_ids, point_size, show_legend, show_liquid, show_fit, bounds)
         else:
             axis = self.figure.add_subplot(111)
-            self._draw_2d(axis, frame, particles, particle_ids, projection, point_size, show_legend, show_liquid, show_fit)
+            self._draw_2d(axis, frame, particles, particle_ids, projection, point_size, show_legend, show_liquid, show_fit, bounds)
+        self._apply_visibility_options(
+            axis,
+            show_title,
+            show_axis_labels,
+            show_axis_ticks,
+            show_info_text,
+            show_grid,
+            frame,
+            downsample,
+            is_3d,
+        )
         self.canvas.draw_idle()
+        return downsample
 
     def save_png(self, path: Path) -> None:
         self.figure.savefig(path, dpi=180)
@@ -328,6 +394,7 @@ class VisualizationPlotWidget(QWidget):
         show_legend: bool,
         show_liquid: bool,
         show_fit: bool,
+        bounds: PlotBounds | None,
     ) -> None:
         axis_index, labels = _projection_axes(projection)
         self._scatter_by_id_2d(axis, particles, particle_ids, axis_index, point_size, show_legend)
@@ -338,8 +405,9 @@ class VisualizationPlotWidget(QWidget):
                 frame.selected_centers[:, axis_index[1]],
                 s=max(point_size * 0.7, 2.0),
                 c="#4c78a8",
-                alpha=0.18,
+                alpha=0.28,
                 label="液滴セル",
+                zorder=10,
             )
 
         contact = frame.contact
@@ -354,15 +422,15 @@ class VisualizationPlotWidget(QWidget):
                     edgecolors="#d62728",
                     linewidths=0.8,
                     label="fit点",
+                    zorder=12,
                 )
             self._draw_fit_geometry_2d(axis, contact, projection, axis_index)
 
         axis.set_title(f"{frame.time_name}: {projection} 可視化")
         axis.set_xlabel(labels[0])
         axis.set_ylabel(labels[1])
-        axis.grid(True, alpha=0.25)
-        axis.set_aspect("equal", adjustable="datalim")
-        self._add_info_text(axis, frame)
+        axis.set_aspect("equal", adjustable="box")
+        self._apply_2d_bounds(axis, projection, bounds)
         if show_legend:
             axis.legend(loc="best", fontsize=8, markerscale=1.8)
 
@@ -376,6 +444,7 @@ class VisualizationPlotWidget(QWidget):
         show_legend: bool,
         show_liquid: bool,
         show_fit: bool,
+        bounds: PlotBounds | None,
     ) -> None:
         self._scatter_by_id_3d(axis, particles, particle_ids, point_size, show_legend)
         if show_liquid and len(frame.selected_centers) > 0:
@@ -396,8 +465,7 @@ class VisualizationPlotWidget(QWidget):
         axis.set_xlabel("x [m]")
         axis.set_ylabel("y [m]")
         axis.set_zlabel("z [m]")
-        self._set_3d_equal(axis, frame)
-        self._add_info_text(axis, frame)
+        self._apply_3d_bounds(axis, bounds, frame)
         if show_legend:
             axis.legend(loc="best", fontsize=8, markerscale=1.8)
 
@@ -415,13 +483,22 @@ class VisualizationPlotWidget(QWidget):
         if particle_ids is None:
             axis.scatter(particles[:, axis_index[0]], particles[:, axis_index[1]], s=point_size, c="#666666", alpha=0.7, label="粒子")
             return
-        unique_ids = np.unique(particle_ids)
+        ordered_ids = id_draw_order(particles, particle_ids)
         cmap = self.figure.colormaps["tab20"] if hasattr(self.figure, "colormaps") else None
-        for index, id_value in enumerate(unique_ids):
+        for index, id_value in enumerate(ordered_ids):
             mask = particle_ids == id_value
-            color = f"C{index % 10}" if cmap is None else cmap(index % 20)
-            label = f"id={id_value}" if show_legend and len(unique_ids) <= 20 else None
-            axis.scatter(particles[mask, axis_index[0]], particles[mask, axis_index[1]], s=point_size, color=color, alpha=0.72, label=label)
+            is_top = index == len(ordered_ids) - 1
+            color = ("#b0b0b0" if not is_top else (f"C{index % 10}" if cmap is None else cmap(index % 20)))
+            label = f"id={id_value}" if show_legend and len(ordered_ids) <= 20 else None
+            axis.scatter(
+                particles[mask, axis_index[0]],
+                particles[mask, axis_index[1]],
+                s=point_size * (1.25 if is_top else 0.35),
+                color=color,
+                alpha=0.88 if is_top else 0.12,
+                label=label,
+                zorder=3 + index,
+            )
 
     def _scatter_by_id_3d(
         self,
@@ -436,11 +513,21 @@ class VisualizationPlotWidget(QWidget):
         if particle_ids is None:
             axis.scatter(particles[:, 0], particles[:, 1], particles[:, 2], s=point_size, c="#666666", alpha=0.7, label="粒子")
             return
-        unique_ids = np.unique(particle_ids)
-        for index, id_value in enumerate(unique_ids):
+        ordered_ids = id_draw_order(particles, particle_ids)
+        for index, id_value in enumerate(ordered_ids):
             mask = particle_ids == id_value
-            label = f"id={id_value}" if show_legend and len(unique_ids) <= 20 else None
-            axis.scatter(particles[mask, 0], particles[mask, 1], particles[mask, 2], s=point_size, color=f"C{index % 10}", alpha=0.72, label=label)
+            label = f"id={id_value}" if show_legend and len(ordered_ids) <= 20 else None
+            is_top = index == len(ordered_ids) - 1
+            axis.scatter(
+                particles[mask, 0],
+                particles[mask, 1],
+                particles[mask, 2],
+                s=point_size * (1.35 if is_top else 0.18),
+                color=f"C{index % 10}" if is_top else "#b0b0b0",
+                alpha=0.9 if is_top else 0.025,
+                depthshade=False,
+                label=label,
+            )
 
     def _draw_fit_geometry_2d(
         self,
@@ -505,11 +592,72 @@ class VisualizationPlotWidget(QWidget):
         axis.set_ylim(center[1] - radius, center[1] + radius)
         axis.set_zlim(center[2] - radius, center[2] + radius)
 
-    def _add_info_text(self, axis, frame: VisualizationFrame) -> None:
+    def _apply_2d_bounds(self, axis, projection: str, bounds: PlotBounds | None) -> None:
+        if bounds is None:
+            return
+        if projection == "yz":
+            axis.set_xlim(bounds.y)
+            axis.set_ylim(bounds.z)
+        elif projection == "xy":
+            axis.set_xlim(bounds.x)
+            axis.set_ylim(bounds.y)
+        else:
+            axis.set_xlim(bounds.x)
+            axis.set_ylim(bounds.z)
+
+    def _apply_3d_bounds(self, axis, bounds: PlotBounds | None, frame: VisualizationFrame) -> None:
+        if bounds is None:
+            self._set_3d_equal(axis, frame)
+            return
+        axis.set_xlim(bounds.x)
+        axis.set_ylim(bounds.y)
+        axis.set_zlim(bounds.z)
+        try:
+            axis.set_box_aspect(
+                (
+                    bounds.x[1] - bounds.x[0],
+                    bounds.y[1] - bounds.y[0],
+                    bounds.z[1] - bounds.z[0],
+                )
+            )
+        except Exception:
+            pass
+
+    def _apply_visibility_options(
+        self,
+        axis,
+        show_title: bool,
+        show_axis_labels: bool,
+        show_axis_ticks: bool,
+        show_info_text: bool,
+        show_grid: bool,
+        frame: VisualizationFrame,
+        downsample,
+        is_3d: bool,
+    ) -> None:
+        if not show_title:
+            axis.set_title("")
+        if not show_axis_labels:
+            axis.set_xlabel("")
+            axis.set_ylabel("")
+            if is_3d and hasattr(axis, "set_zlabel"):
+                axis.set_zlabel("")
+        if not show_axis_ticks:
+            axis.set_xticks([])
+            axis.set_yticks([])
+            if is_3d and hasattr(axis, "set_zticks"):
+                axis.set_zticks([])
+        axis.grid(show_grid, alpha=0.25)
+        if show_info_text:
+            self._add_info_text(axis, frame, downsample)
+
+    def _add_info_text(self, axis, frame: VisualizationFrame, downsample) -> None:
         contact = frame.contact
         angle = "-" if contact.contact_angle_deg is None else f"{contact.contact_angle_deg:.4g} deg"
         radius = "-" if contact.contact_radius is None else f"{contact.contact_radius:.4g} m"
         text = f"粒子 {len(frame.particles.positions)} / 液滴セル {len(frame.selected_centers)} / fit点 {contact.fit_point_count}\n接触角 {angle} / 接触半径 {radius}"
+        if downsample.was_downsampled:
+            text += f"\n表示用間引き: {downsample.original_count} -> {downsample.displayed_count}"
         if frame.particles.id_warning:
             text += f"\n{frame.particles.id_warning}"
         if contact.failure_reason:
@@ -593,6 +741,7 @@ class MainWindow(QMainWindow):
         self.loaded_source = ""
         self.remote_browser_connection: SshConnection | None = None
         self.remote_browser_path = ""
+        self._last_visual_downsample_message = ""
         self.results: list[CaseResult] = []
         self.worker: AnalyzerWorker | None = None
         self.thread: QThread | None = None
@@ -871,8 +1020,19 @@ class MainWindow(QMainWindow):
         self.visual_max_points_spin = QSpinBox()
         self.visual_max_points_spin.setRange(0, 10_000_000)
         self.visual_max_points_spin.setValue(0)
+        self.visual_max_points_spin.setToolTip("0は2Dでは全表示、3D周期表示では自動上限を使います。")
         self.visual_legend_check = QCheckBox("凡例")
         self.visual_legend_check.setChecked(True)
+        self.visual_title_check = QCheckBox("タイトル")
+        self.visual_title_check.setChecked(True)
+        self.visual_axis_label_check = QCheckBox("軸ラベル")
+        self.visual_axis_label_check.setChecked(True)
+        self.visual_axis_tick_check = QCheckBox("軸目盛")
+        self.visual_axis_tick_check.setChecked(True)
+        self.visual_info_check = QCheckBox("情報")
+        self.visual_info_check.setChecked(True)
+        self.visual_grid_check = QCheckBox("グリッド")
+        self.visual_grid_check.setChecked(True)
         self.visual_liquid_check = QCheckBox("液滴セル")
         self.visual_liquid_check.setChecked(True)
         self.visual_fit_check = QCheckBox("fit診断")
@@ -886,9 +1046,14 @@ class MainWindow(QMainWindow):
         visual_options_row.addWidget(self.visual_tile_spin)
         visual_options_row.addWidget(QLabel("点"))
         visual_options_row.addWidget(self.visual_point_size_spin)
-        visual_options_row.addWidget(QLabel("最大点数"))
+        visual_options_row.addWidget(QLabel("最大表示点数"))
         visual_options_row.addWidget(self.visual_max_points_spin)
         visual_options_row.addWidget(self.visual_legend_check)
+        visual_options_row.addWidget(self.visual_title_check)
+        visual_options_row.addWidget(self.visual_axis_label_check)
+        visual_options_row.addWidget(self.visual_axis_tick_check)
+        visual_options_row.addWidget(self.visual_info_check)
+        visual_options_row.addWidget(self.visual_grid_check)
         visual_options_row.addWidget(self.visual_liquid_check)
         visual_options_row.addWidget(self.visual_fit_check)
         visual_options_row.addStretch(1)
@@ -966,6 +1131,11 @@ class MainWindow(QMainWindow):
         self.visual_point_size_spin.valueChanged.connect(lambda _: self.refresh_visualization())
         self.visual_max_points_spin.valueChanged.connect(lambda _: self.refresh_visualization())
         self.visual_legend_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_title_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_axis_label_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_axis_tick_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_info_check.stateChanged.connect(lambda _: self.refresh_visualization())
+        self.visual_grid_check.stateChanged.connect(lambda _: self.refresh_visualization())
         self.visual_liquid_check.stateChanged.connect(lambda _: self.refresh_visualization())
         self.visual_fit_check.stateChanged.connect(lambda _: self.refresh_visualization())
         self.visual_png_button.clicked.connect(self.export_visual_png)
@@ -1469,6 +1639,7 @@ class MainWindow(QMainWindow):
         result = self.current_result()
         if result is None or not result.rows or not self.visual_time_slider.isEnabled():
             return
+        self._apply_visual_defaults()
         index = max(0, min(self.visual_time_slider.value(), len(result.rows) - 1))
         row = result.rows[index]
         self.visual_time_label.setText(f"時刻: {row.time:.8g}")
@@ -1479,8 +1650,15 @@ class MainWindow(QMainWindow):
             self.visual_plot.clear(f"可視化データを読み込めません: {exc}")
             self.log(f"可視化データを読み込めません: {exc}")
 
+    def _apply_visual_defaults(self) -> None:
+        if self.visual_mode_combo.currentText().startswith("3D") and self.visual_periodic_check.isChecked():
+            if self.visual_max_points_spin.value() == 0:
+                self.visual_max_points_spin.blockSignals(True)
+                self.visual_max_points_spin.setSpecialValueText(f"自動({THREE_D_AUTO_MAX_POINTS})")
+                self.visual_max_points_spin.blockSignals(False)
+
     def _draw_visual_frame(self, frame: VisualizationFrame) -> None:
-        self.visual_plot.draw_frame(
+        downsample = self.visual_plot.draw_frame(
             frame,
             self.visual_mode_combo.currentText(),
             self.visual_projection_combo.currentText(),
@@ -1489,9 +1667,19 @@ class MainWindow(QMainWindow):
             self.visual_point_size_spin.value(),
             self.visual_max_points_spin.value(),
             self.visual_legend_check.isChecked(),
+            self.visual_title_check.isChecked(),
+            self.visual_axis_label_check.isChecked(),
+            self.visual_axis_tick_check.isChecked(),
+            self.visual_info_check.isChecked(),
+            self.visual_grid_check.isChecked(),
             self.visual_liquid_check.isChecked(),
             self.visual_fit_check.isChecked(),
         )
+        if downsample.was_downsampled:
+            message = f"表示用間引き: {downsample.original_count} -> {downsample.displayed_count}"
+            if message != self._last_visual_downsample_message:
+                self.log(message)
+                self._last_visual_downsample_message = message
 
     def _load_visual_frame(self, result: CaseResult, time_value: float) -> VisualizationFrame:
         time_dir = self._ensure_visualization_files(result, time_value)
