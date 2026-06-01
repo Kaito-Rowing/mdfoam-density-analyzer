@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -38,6 +40,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtGui import QColor
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtGui import QKeySequence
 
@@ -90,6 +93,31 @@ rcParams["axes.unicode_minus"] = False
 THREE_D_AUTO_MAX_POINTS = 50_000
 
 
+@dataclass
+class GraphSettings:
+    point_color: str = "#1f77b4"
+    point_size: float = 18.0
+    point_alpha: float = 0.9
+    font_size: int = 10
+    title_visible: bool = True
+    axis_labels_visible: bool = True
+    tick_labels_visible: bool = True
+    grid_visible: bool = True
+    axis_auto: bool = True
+    x_min: float = 0.0
+    x_max: float = 1.0
+    y_min: float = 0.0
+    y_max: float = 1.0
+    aspect: str = "自動"
+    x_log: bool = False
+    y_log: bool = False
+    marker: str = "o"
+    image_width: float = 8.0
+    image_height: float = 5.0
+    dpi: int = 180
+    transparent: bool = False
+
+
 class ScientificDoubleSpinBox(QDoubleSpinBox):
     def __init__(self) -> None:
         super().__init__()
@@ -102,6 +130,26 @@ class ScientificDoubleSpinBox(QDoubleSpinBox):
     def valueFromText(self, text: str) -> float:
         try:
             return max(0.0, float(text.strip()))
+        except ValueError:
+            return 0.0
+
+    def validate(self, text: str, position: int):
+        return self.validator.validate(text, position)
+
+
+class SignedScientificDoubleSpinBox(QDoubleSpinBox):
+    def __init__(self) -> None:
+        super().__init__()
+        self.validator = QDoubleValidator(-1.0e100, 1.0e100, 16, self)
+        self.validator.setNotation(QDoubleValidator.ScientificNotation)
+        self.setDecimals(16)
+
+    def textFromValue(self, value: float) -> str:
+        return f"{value:.8g}"
+
+    def valueFromText(self, text: str) -> float:
+        try:
+            return float(text.strip())
         except ValueError:
             return 0.0
 
@@ -234,40 +282,98 @@ class PlotWidget(QWidget):
         super().__init__()
         self.figure = Figure(figsize=(5, 3), tight_layout=True)
         self.canvas = FigureCanvas(self.figure)
+        self.settings = GraphSettings()
+        self._last_plot: tuple[str, str, str, str, list, list] | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
 
     def clear(self, title: str) -> None:
+        self._last_plot = ("clear", title, "", "", [], [])
         self.figure.clear()
         axis = self.figure.add_subplot(111)
-        axis.set_title(title)
-        axis.grid(True, alpha=0.3)
+        self._apply_common_style(axis, "", "", title)
         self.canvas.draw_idle()
 
     def plot_xy(self, title: str, x_label: str, y_label: str, x: list[float], y: list[float]) -> None:
+        self._last_plot = ("xy", title, x_label, y_label, list(x), list(y))
         self.figure.clear()
         axis = self.figure.add_subplot(111)
-        axis.scatter(x, y, s=18)
-        axis.set_title(title)
-        axis.set_xlabel(x_label)
-        axis.set_ylabel(y_label)
-        axis.grid(True, alpha=0.3)
+        axis.scatter(
+            x,
+            y,
+            s=self.settings.point_size,
+            c=self.settings.point_color,
+            alpha=self.settings.point_alpha,
+            marker=self.settings.marker,
+        )
+        self._apply_common_style(axis, x_label, y_label, title)
         self.canvas.draw_idle()
 
     def plot_bar(self, title: str, labels: list[str], values: list[float]) -> None:
+        self._last_plot = ("bar", title, "", "蒸発完了時間 [s]", list(labels), list(values))
         self.figure.clear()
         axis = self.figure.add_subplot(111)
-        axis.bar(labels, values)
-        axis.set_title(title)
-        axis.set_ylabel("蒸発完了時間 [s]")
-        axis.tick_params(axis="x", rotation=45)
-        axis.grid(True, axis="y", alpha=0.3)
+        axis.bar(labels, values, color=self.settings.point_color, alpha=self.settings.point_alpha)
+        self._apply_common_style(axis, "", "蒸発完了時間 [s]", title, is_bar=True)
+        axis.tick_params(axis="x", rotation=45 if self.settings.tick_labels_visible else 0)
         self.figure.tight_layout()
         self.canvas.draw_idle()
 
+    def redraw(self) -> None:
+        if self._last_plot is None:
+            return
+        kind, title, x_label, y_label, x, y = self._last_plot
+        if kind == "xy":
+            self.plot_xy(title, x_label, y_label, x, y)
+        elif kind == "bar":
+            self.plot_bar(title, x, y)
+        elif kind == "clear":
+            self.clear(title)
+
     def save_png(self, path: Path) -> None:
-        self.figure.savefig(path, dpi=180)
+        self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
+        self.figure.tight_layout()
+        self.figure.savefig(
+            path,
+            dpi=self.settings.dpi,
+            transparent=self.settings.transparent,
+            bbox_inches="tight",
+        )
+
+    def _apply_common_style(
+        self,
+        axis,
+        x_label: str,
+        y_label: str,
+        title: str = "",
+        is_bar: bool = False,
+    ) -> None:
+        settings = self.settings
+        if settings.title_visible and title:
+            axis.set_title(title, fontsize=settings.font_size + 1)
+        axis.set_xlabel(x_label if settings.axis_labels_visible else "", fontsize=settings.font_size)
+        axis.set_ylabel(y_label if settings.axis_labels_visible else "", fontsize=settings.font_size)
+        if not is_bar:
+            axis.set_xscale("log" if settings.x_log else "linear")
+        axis.set_yscale("log" if settings.y_log else "linear")
+        axis.tick_params(
+            axis="both",
+            which="both",
+            labelsize=settings.font_size,
+            labelbottom=settings.tick_labels_visible,
+            labelleft=settings.tick_labels_visible,
+        )
+        axis.grid(settings.grid_visible, alpha=0.3)
+        if not settings.axis_auto:
+            if not is_bar and settings.x_min < settings.x_max:
+                axis.set_xlim(settings.x_min, settings.x_max)
+            if settings.y_min < settings.y_max:
+                axis.set_ylim(settings.y_min, settings.y_max)
+        if settings.aspect == "等倍":
+            axis.set_aspect("equal", adjustable="box")
+        else:
+            axis.set_aspect("auto")
 
 
 class VisualizationPlotWidget(QWidget):
@@ -935,6 +1041,89 @@ class MainWindow(QMainWindow):
         export_row.addWidget(self.export_png_button)
         results_layout.addLayout(export_row)
 
+        graph_settings_group = QGroupBox("グラフ表示設定")
+        graph_settings_layout = QVBoxLayout(graph_settings_group)
+        graph_row1 = QHBoxLayout()
+        self.graph_color_button = QPushButton("色")
+        self.graph_point_size_spin = QDoubleSpinBox()
+        self.graph_point_size_spin.setRange(1.0, 200.0)
+        self.graph_point_size_spin.setDecimals(1)
+        self.graph_alpha_spin = QDoubleSpinBox()
+        self.graph_alpha_spin.setRange(0.05, 1.0)
+        self.graph_alpha_spin.setSingleStep(0.05)
+        self.graph_alpha_spin.setDecimals(2)
+        self.graph_font_size_spin = QSpinBox()
+        self.graph_font_size_spin.setRange(6, 40)
+        self.graph_marker_combo = QComboBox()
+        self.graph_marker_combo.addItems(["o", "s", "^", "D", "x", "+", "."])
+        self.graph_aspect_combo = QComboBox()
+        self.graph_aspect_combo.addItems(["自動", "等倍"])
+        self.graph_title_check = QCheckBox("タイトル")
+        self.graph_axis_label_check = QCheckBox("軸ラベル")
+        self.graph_tick_label_check = QCheckBox("目盛")
+        self.graph_grid_check = QCheckBox("グリッド")
+        graph_row1.addWidget(QLabel("点色"))
+        graph_row1.addWidget(self.graph_color_button)
+        graph_row1.addWidget(QLabel("点サイズ"))
+        graph_row1.addWidget(self.graph_point_size_spin)
+        graph_row1.addWidget(QLabel("透明度"))
+        graph_row1.addWidget(self.graph_alpha_spin)
+        graph_row1.addWidget(QLabel("文字"))
+        graph_row1.addWidget(self.graph_font_size_spin)
+        graph_row1.addWidget(QLabel("マーカー"))
+        graph_row1.addWidget(self.graph_marker_combo)
+        graph_row1.addWidget(QLabel("縦横"))
+        graph_row1.addWidget(self.graph_aspect_combo)
+        graph_row1.addWidget(self.graph_title_check)
+        graph_row1.addWidget(self.graph_axis_label_check)
+        graph_row1.addWidget(self.graph_tick_label_check)
+        graph_row1.addWidget(self.graph_grid_check)
+        graph_row1.addStretch(1)
+        graph_settings_layout.addLayout(graph_row1)
+
+        graph_row2 = QHBoxLayout()
+        self.graph_axis_auto_check = QCheckBox("軸自動")
+        self.graph_x_min_spin = self._signed_scientific_spin(0.0)
+        self.graph_x_max_spin = self._signed_scientific_spin(1.0)
+        self.graph_y_min_spin = self._signed_scientific_spin(0.0)
+        self.graph_y_max_spin = self._signed_scientific_spin(1.0)
+        self.graph_x_log_check = QCheckBox("x対数")
+        self.graph_y_log_check = QCheckBox("y対数")
+        graph_row2.addWidget(self.graph_axis_auto_check)
+        graph_row2.addWidget(QLabel("x最小"))
+        graph_row2.addWidget(self.graph_x_min_spin)
+        graph_row2.addWidget(QLabel("x最大"))
+        graph_row2.addWidget(self.graph_x_max_spin)
+        graph_row2.addWidget(QLabel("y最小"))
+        graph_row2.addWidget(self.graph_y_min_spin)
+        graph_row2.addWidget(QLabel("y最大"))
+        graph_row2.addWidget(self.graph_y_max_spin)
+        graph_row2.addWidget(self.graph_x_log_check)
+        graph_row2.addWidget(self.graph_y_log_check)
+        graph_row2.addStretch(1)
+        graph_settings_layout.addLayout(graph_row2)
+
+        graph_row3 = QHBoxLayout()
+        self.graph_width_spin = QDoubleSpinBox()
+        self.graph_width_spin.setRange(1.0, 30.0)
+        self.graph_width_spin.setDecimals(1)
+        self.graph_height_spin = QDoubleSpinBox()
+        self.graph_height_spin.setRange(1.0, 30.0)
+        self.graph_height_spin.setDecimals(1)
+        self.graph_dpi_spin = QSpinBox()
+        self.graph_dpi_spin.setRange(72, 1200)
+        self.graph_transparent_check = QCheckBox("透明背景")
+        graph_row3.addWidget(QLabel("PNG幅[in]"))
+        graph_row3.addWidget(self.graph_width_spin)
+        graph_row3.addWidget(QLabel("PNG高さ[in]"))
+        graph_row3.addWidget(self.graph_height_spin)
+        graph_row3.addWidget(QLabel("DPI"))
+        graph_row3.addWidget(self.graph_dpi_spin)
+        graph_row3.addWidget(self.graph_transparent_check)
+        graph_row3.addStretch(1)
+        graph_settings_layout.addLayout(graph_row3)
+        results_layout.addWidget(graph_settings_group)
+
         self.table = ResultsTable(0, 11)
         self.table.setHorizontalHeaderLabels(
             [
@@ -1119,6 +1308,36 @@ class MainWindow(QMainWindow):
         self.export_csv_button.clicked.connect(self.export_csv)
         self.export_png_button.clicked.connect(self.export_png)
         self.table.itemSelectionChanged.connect(self.update_selected_case_plots)
+        self.tabs.currentChanged.connect(self.on_result_tab_changed)
+        self.graph_color_button.clicked.connect(self.choose_graph_color)
+        for widget in (
+            self.graph_point_size_spin,
+            self.graph_alpha_spin,
+            self.graph_font_size_spin,
+            self.graph_marker_combo,
+            self.graph_aspect_combo,
+            self.graph_title_check,
+            self.graph_axis_label_check,
+            self.graph_tick_label_check,
+            self.graph_grid_check,
+            self.graph_axis_auto_check,
+            self.graph_x_min_spin,
+            self.graph_x_max_spin,
+            self.graph_y_min_spin,
+            self.graph_y_max_spin,
+            self.graph_x_log_check,
+            self.graph_y_log_check,
+            self.graph_width_spin,
+            self.graph_height_spin,
+            self.graph_dpi_spin,
+            self.graph_transparent_check,
+        ):
+            if isinstance(widget, QComboBox):
+                widget.currentTextChanged.connect(lambda _: self.on_graph_settings_changed())
+            elif isinstance(widget, QCheckBox):
+                widget.stateChanged.connect(lambda _: self.on_graph_settings_changed())
+            else:
+                widget.valueChanged.connect(lambda _: self.on_graph_settings_changed())
         self.visual_time_slider.valueChanged.connect(self.on_visual_time_changed)
         self.visual_prev_button.clicked.connect(lambda: self.set_visual_time_index(self.visual_time_slider.value() - 1))
         self.visual_next_button.clicked.connect(lambda: self.set_visual_time_index(self.visual_time_slider.value() + 1))
@@ -1140,6 +1359,7 @@ class MainWindow(QMainWindow):
         self.visual_fit_check.stateChanged.connect(lambda _: self.refresh_visualization())
         self.visual_png_button.clicked.connect(self.export_visual_png)
         self.visual_gif_button.clicked.connect(self.export_visual_gif)
+        self.load_graph_settings_from_current_plot()
 
     @Slot(int)
     def select_table_column(self, column: int) -> None:
@@ -1155,6 +1375,13 @@ class MainWindow(QMainWindow):
         spin = ScientificDoubleSpinBox()
         spin.setDecimals(16)
         spin.setRange(0.0, 1.0e100)
+        spin.setSingleStep(1.0)
+        spin.setValue(value)
+        return spin
+
+    def _signed_scientific_spin(self, value: float) -> QDoubleSpinBox:
+        spin = SignedScientificDoubleSpinBox()
+        spin.setRange(-1.0e100, 1.0e100)
         spin.setSingleStep(1.0)
         spin.setValue(value)
         return spin
@@ -1473,6 +1700,147 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
+
+    def current_plot_widget(self) -> PlotWidget | None:
+        tab = self.tabs.currentWidget()
+        return tab if isinstance(tab, PlotWidget) else None
+
+    @Slot()
+    def choose_graph_color(self) -> None:
+        plot = self.current_plot_widget()
+        if plot is None:
+            return
+        color = QColorDialog.getColor(QColor(plot.settings.point_color), self, "点色")
+        if not color.isValid():
+            return
+        plot.settings.point_color = color.name()
+        self._set_graph_color_button(plot.settings.point_color)
+        plot.redraw()
+
+    @Slot()
+    def on_result_tab_changed(self) -> None:
+        self.load_graph_settings_from_current_plot()
+
+    def load_graph_settings_from_current_plot(self) -> None:
+        plot = self.current_plot_widget()
+        enabled = plot is not None
+        for widget in (
+            self.graph_color_button,
+            self.graph_point_size_spin,
+            self.graph_alpha_spin,
+            self.graph_font_size_spin,
+            self.graph_marker_combo,
+            self.graph_aspect_combo,
+            self.graph_title_check,
+            self.graph_axis_label_check,
+            self.graph_tick_label_check,
+            self.graph_grid_check,
+            self.graph_axis_auto_check,
+            self.graph_x_min_spin,
+            self.graph_x_max_spin,
+            self.graph_y_min_spin,
+            self.graph_y_max_spin,
+            self.graph_x_log_check,
+            self.graph_y_log_check,
+            self.graph_width_spin,
+            self.graph_height_spin,
+            self.graph_dpi_spin,
+            self.graph_transparent_check,
+        ):
+            widget.blockSignals(True)
+            widget.setEnabled(enabled)
+        if plot is not None:
+            settings = plot.settings
+            self._set_graph_color_button(settings.point_color)
+            self.graph_point_size_spin.setValue(settings.point_size)
+            self.graph_alpha_spin.setValue(settings.point_alpha)
+            self.graph_font_size_spin.setValue(settings.font_size)
+            self.graph_marker_combo.setCurrentText(settings.marker)
+            self.graph_aspect_combo.setCurrentText(settings.aspect)
+            self.graph_title_check.setChecked(settings.title_visible)
+            self.graph_axis_label_check.setChecked(settings.axis_labels_visible)
+            self.graph_tick_label_check.setChecked(settings.tick_labels_visible)
+            self.graph_grid_check.setChecked(settings.grid_visible)
+            self.graph_axis_auto_check.setChecked(settings.axis_auto)
+            self.graph_x_min_spin.setValue(settings.x_min)
+            self.graph_x_max_spin.setValue(settings.x_max)
+            self.graph_y_min_spin.setValue(settings.y_min)
+            self.graph_y_max_spin.setValue(settings.y_max)
+            self.graph_x_log_check.setChecked(settings.x_log)
+            self.graph_y_log_check.setChecked(settings.y_log)
+            self.graph_width_spin.setValue(settings.image_width)
+            self.graph_height_spin.setValue(settings.image_height)
+            self.graph_dpi_spin.setValue(settings.dpi)
+            self.graph_transparent_check.setChecked(settings.transparent)
+        for widget in (
+            self.graph_color_button,
+            self.graph_point_size_spin,
+            self.graph_alpha_spin,
+            self.graph_font_size_spin,
+            self.graph_marker_combo,
+            self.graph_aspect_combo,
+            self.graph_title_check,
+            self.graph_axis_label_check,
+            self.graph_tick_label_check,
+            self.graph_grid_check,
+            self.graph_axis_auto_check,
+            self.graph_x_min_spin,
+            self.graph_x_max_spin,
+            self.graph_y_min_spin,
+            self.graph_y_max_spin,
+            self.graph_x_log_check,
+            self.graph_y_log_check,
+            self.graph_width_spin,
+            self.graph_height_spin,
+            self.graph_dpi_spin,
+            self.graph_transparent_check,
+        ):
+            widget.blockSignals(False)
+        self.update_axis_spin_enabled()
+
+    def on_graph_settings_changed(self) -> None:
+        plot = self.current_plot_widget()
+        if plot is None:
+            return
+        settings = plot.settings
+        settings.point_size = self.graph_point_size_spin.value()
+        settings.point_alpha = self.graph_alpha_spin.value()
+        settings.font_size = self.graph_font_size_spin.value()
+        settings.marker = self.graph_marker_combo.currentText()
+        settings.aspect = self.graph_aspect_combo.currentText()
+        settings.title_visible = self.graph_title_check.isChecked()
+        settings.axis_labels_visible = self.graph_axis_label_check.isChecked()
+        settings.tick_labels_visible = self.graph_tick_label_check.isChecked()
+        settings.grid_visible = self.graph_grid_check.isChecked()
+        settings.axis_auto = self.graph_axis_auto_check.isChecked()
+        settings.x_min = self.graph_x_min_spin.value()
+        settings.x_max = self.graph_x_max_spin.value()
+        settings.y_min = self.graph_y_min_spin.value()
+        settings.y_max = self.graph_y_max_spin.value()
+        settings.x_log = self.graph_x_log_check.isChecked()
+        settings.y_log = self.graph_y_log_check.isChecked()
+        settings.image_width = self.graph_width_spin.value()
+        settings.image_height = self.graph_height_spin.value()
+        settings.dpi = self.graph_dpi_spin.value()
+        settings.transparent = self.graph_transparent_check.isChecked()
+        self.update_axis_spin_enabled()
+        plot.redraw()
+
+    def update_axis_spin_enabled(self) -> None:
+        plot = self.current_plot_widget()
+        plot_kind = plot._last_plot[0] if plot is not None and plot._last_plot is not None else "xy"
+        has_plot = plot is not None
+        x_axis_available = has_plot and plot_kind == "xy"
+        manual_axis = has_plot and not self.graph_axis_auto_check.isChecked()
+        self.graph_x_min_spin.setEnabled(manual_axis and x_axis_available)
+        self.graph_x_max_spin.setEnabled(manual_axis and x_axis_available)
+        self.graph_y_min_spin.setEnabled(manual_axis)
+        self.graph_y_max_spin.setEnabled(manual_axis)
+        self.graph_x_log_check.setEnabled(x_axis_available)
+        self.graph_y_log_check.setEnabled(has_plot)
+
+    def _set_graph_color_button(self, color: str) -> None:
+        self.graph_color_button.setStyleSheet(f"background-color: {color};")
 
     @Slot()
     def stop_analysis(self) -> None:
