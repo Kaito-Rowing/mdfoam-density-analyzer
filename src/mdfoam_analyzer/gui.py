@@ -74,6 +74,18 @@ from .remote import (
     sync_remote_lagrangian_time,
     validate_private_key_path,
 )
+from .theory import (
+    DEFAULT_ALPHA_VALUES,
+    THEORY_PRESETS,
+    TheoryComparison,
+    TheorySettings,
+    build_theory_comparison,
+    evaporation_flux,
+    height_to_contact_radius_ratio,
+    spherical_cap_geometry,
+    write_theory_summary_csv,
+    write_theory_timeseries_csv,
+)
 from .visualization import (
     PlotBounds,
     VisualizationFrame,
@@ -116,6 +128,18 @@ class GraphSettings:
     image_height: float = 5.0
     dpi: int = 180
     transparent: bool = False
+
+
+@dataclass
+class PlotSeries:
+    label: str
+    x: list[float]
+    y: list[float]
+    style: str = "scatter"
+    color: str | None = None
+    marker: str | None = None
+    linestyle: str = "-"
+    linewidth: float = 1.5
 
 
 class ScientificDoubleSpinBox(QDoubleSpinBox):
@@ -285,12 +309,14 @@ class PlotWidget(QWidget):
         self.canvas = FigureCanvas(self.figure)
         self.settings = GraphSettings()
         self._last_plot: tuple[str, str, str, str, list, list] | None = None
+        self._last_series: tuple[str, str, str, list[PlotSeries]] | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
 
     def clear(self, title: str) -> None:
         self._last_plot = ("clear", title, "", "", [], [])
+        self._last_series = None
         self.figure.clear()
         axis = self.figure.add_subplot(111)
         self._apply_common_style(axis, "", "", title)
@@ -298,6 +324,7 @@ class PlotWidget(QWidget):
 
     def plot_xy(self, title: str, x_label: str, y_label: str, x: list[float], y: list[float]) -> None:
         self._last_plot = ("xy", title, x_label, y_label, list(x), list(y))
+        self._last_series = None
         self.figure.clear()
         axis = self.figure.add_subplot(111)
         axis.scatter(
@@ -311,8 +338,55 @@ class PlotWidget(QWidget):
         self._apply_common_style(axis, x_label, y_label, title)
         self.canvas.draw_idle()
 
+    def plot_series(self, title: str, x_label: str, y_label: str, series_list: list[PlotSeries]) -> None:
+        copied_series = [
+            PlotSeries(
+                item.label,
+                list(item.x),
+                list(item.y),
+                item.style,
+                item.color,
+                item.marker,
+                item.linestyle,
+                item.linewidth,
+            )
+            for item in series_list
+        ]
+        self._last_plot = ("series", title, x_label, y_label, [], [])
+        self._last_series = (title, x_label, y_label, copied_series)
+        self.figure.clear()
+        axis = self.figure.add_subplot(111)
+        for item in copied_series:
+            if not item.x or not item.y:
+                continue
+            if item.style == "line":
+                axis.plot(
+                    item.x,
+                    item.y,
+                    label=item.label,
+                    color=item.color,
+                    linestyle=item.linestyle,
+                    linewidth=item.linewidth,
+                    alpha=self.settings.point_alpha,
+                )
+            else:
+                axis.scatter(
+                    item.x,
+                    item.y,
+                    label=item.label,
+                    s=self.settings.point_size,
+                    c=item.color or self.settings.point_color,
+                    alpha=self.settings.point_alpha,
+                    marker=item.marker or self.settings.marker,
+                )
+        if any(item.label for item in copied_series):
+            axis.legend(fontsize=max(6, self.settings.font_size - 1))
+        self._apply_common_style(axis, x_label, y_label, title)
+        self.canvas.draw_idle()
+
     def plot_bar(self, title: str, labels: list[str], values: list[float]) -> None:
         self._last_plot = ("bar", title, "", "蒸発完了時間 [s]", list(labels), list(values))
+        self._last_series = None
         self.figure.clear()
         axis = self.figure.add_subplot(111)
         axis.bar(labels, values, color=self.settings.point_color, alpha=self.settings.point_alpha)
@@ -329,6 +403,8 @@ class PlotWidget(QWidget):
             self.plot_xy(title, x_label, y_label, x, y)
         elif kind == "bar":
             self.plot_bar(title, x, y)
+        elif kind == "series" and self._last_series is not None:
+            self.plot_series(*self._last_series)
         elif kind == "clear":
             self.clear(title)
 
@@ -1021,6 +1097,61 @@ class MainWindow(QMainWindow):
         advanced_layout.addRow("平均接触角の対象範囲", self.contact_average_percent_spin)
         advanced_layout.addRow("xy周期補正", self.contact_unwrap_check)
         settings_content_layout.addWidget(advanced_group)
+
+        theory_group = QGroupBox("蒸発係数 / 理論比較")
+        theory_layout = QFormLayout(theory_group)
+        theory_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        default_theory = THEORY_PRESETS["xlsx準拠"]
+        self.theory_preset_combo = QComboBox()
+        self.theory_preset_combo.addItems(list(THEORY_PRESETS.keys()))
+        self.theory_rho_v_spin = self._scientific_spin(default_theory.rho_v)
+        self.theory_rho_l_spin = self._scientific_spin(default_theory.rho_l)
+        self.theory_temperature_spin = self._scientific_spin(default_theory.temperature)
+        self.theory_molecule_mass_spin = self._scientific_spin(default_theory.molecule_mass)
+        self.theory_v0_source_combo = QComboBox()
+        self.theory_v0_source_combo.addItems(["最大体積", "先頭時刻体積"])
+        self.theory_theta_source_combo = QComboBox()
+        self.theory_theta_source_combo.addItems(["平均接触角", "固定theta"])
+        self.theory_fixed_theta_spin = QDoubleSpinBox()
+        self.theory_fixed_theta_spin.setDecimals(6)
+        self.theory_fixed_theta_spin.setRange(0.001, 179.999)
+        self.theory_fixed_theta_spin.setSingleStep(0.1)
+        self.theory_fixed_theta_spin.setValue(default_theory.fixed_theta_deg)
+        self.theory_fit_percent_spin = QDoubleSpinBox()
+        self.theory_fit_percent_spin.setDecimals(1)
+        self.theory_fit_percent_spin.setRange(1.0, 100.0)
+        self.theory_fit_percent_spin.setSingleStep(5.0)
+        self.theory_fit_percent_spin.setSuffix(" %")
+        self.theory_fit_percent_spin.setValue(100.0)
+        self.theory_fit_nonzero_check = QCheckBox("有効")
+        self.theory_fit_nonzero_check.setChecked(True)
+        self.theory_fit_alpha_min_spin = QDoubleSpinBox()
+        self.theory_fit_alpha_min_spin.setDecimals(4)
+        self.theory_fit_alpha_min_spin.setRange(0.0, 10.0)
+        self.theory_fit_alpha_min_spin.setSingleStep(0.05)
+        self.theory_fit_alpha_min_spin.setValue(0.0)
+        self.theory_fit_alpha_max_spin = QDoubleSpinBox()
+        self.theory_fit_alpha_max_spin.setDecimals(4)
+        self.theory_fit_alpha_max_spin.setRange(0.0, 10.0)
+        self.theory_fit_alpha_max_spin.setSingleStep(0.05)
+        self.theory_fit_alpha_max_spin.setValue(1.0)
+        self.theory_diagnostics_label = QLabel()
+        self.theory_diagnostics_label.setWordWrap(True)
+        self.theory_diagnostics_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        theory_layout.addRow("物性値プリセット", self.theory_preset_combo)
+        theory_layout.addRow("飽和蒸気密度 rho_v [kg/m^3]", self.theory_rho_v_spin)
+        theory_layout.addRow("液体密度 rho_l [kg/m^3]", self.theory_rho_l_spin)
+        theory_layout.addRow("温度 T [K]", self.theory_temperature_spin)
+        theory_layout.addRow("分子1個の質量 m [kg]", self.theory_molecule_mass_spin)
+        theory_layout.addRow("理論初期体積 V0", self.theory_v0_source_combo)
+        theory_layout.addRow("接触角ソース", self.theory_theta_source_combo)
+        theory_layout.addRow("固定theta [deg]", self.theory_fixed_theta_spin)
+        theory_layout.addRow("fit対象範囲", self.theory_fit_percent_spin)
+        theory_layout.addRow("非ゼロ体積のみfit", self.theory_fit_nonzero_check)
+        theory_layout.addRow("fit alpha_e 下限", self.theory_fit_alpha_min_spin)
+        theory_layout.addRow("fit alpha_e 上限", self.theory_fit_alpha_max_spin)
+        theory_layout.addRow("計算確認", self.theory_diagnostics_label)
+        settings_content_layout.addWidget(theory_group)
         settings_content_layout.addStretch(1)
 
         run_group = QGroupBox("実行")
@@ -1132,7 +1263,7 @@ class MainWindow(QMainWindow):
         graph_settings_layout.addLayout(graph_row3)
         results_layout.addWidget(graph_settings_group)
 
-        self.table = ResultsTable(0, 12)
+        self.table = ResultsTable(0, 16)
         self.table.setHorizontalHeaderLabels(
             [
                 "ケース",
@@ -1145,6 +1276,10 @@ class MainWindow(QMainWindow):
                 "平均接触角",
                 "初期接触半径",
                 "最終有効接触半径",
+                "推定alpha_e",
+                "fit RMSE",
+                "fit R^2",
+                "fit状態",
                 "状態",
                 "エラー",
             ]
@@ -1186,6 +1321,37 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.contact_angle_plot, "接触角-時間")
         self.tabs.addTab(self.contact_radius_plot, "接触半径-時間")
         self.tabs.addTab(self.evap_plot, "蒸発完了時刻")
+
+        self.theory_tab = QWidget()
+        theory_tab_layout = QVBoxLayout(self.theory_tab)
+        theory_controls_row = QHBoxLayout()
+        self.theory_show_md_check = QCheckBox("MD")
+        self.theory_show_md_check.setChecked(True)
+        self.theory_alpha_checks: dict[float, QCheckBox] = {}
+        theory_controls_row.addWidget(self.theory_show_md_check)
+        for alpha in DEFAULT_ALPHA_VALUES:
+            checkbox = QCheckBox(f"alpha_e={alpha:g}")
+            checkbox.setChecked(True)
+            self.theory_alpha_checks[float(alpha)] = checkbox
+            theory_controls_row.addWidget(checkbox)
+        self.theory_show_fit_check = QCheckBox("fit推定")
+        self.theory_show_fit_check.setChecked(True)
+        self.theory_fit_label = QLabel("推定alpha_e: -")
+        self.theory_fit_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        theory_controls_row.addWidget(self.theory_show_fit_check)
+        theory_controls_row.addStretch(1)
+        theory_controls_row.addWidget(self.theory_fit_label)
+        theory_tab_layout.addLayout(theory_controls_row)
+        self.theory_em_plot = PlotWidget()
+        self.theory_radius_plot = PlotWidget()
+        theory_splitter = QSplitter(Qt.Vertical)
+        theory_splitter.addWidget(self.theory_em_plot)
+        theory_splitter.addWidget(self.theory_radius_plot)
+        theory_splitter.setStretchFactor(0, 1)
+        theory_splitter.setStretchFactor(1, 1)
+        theory_tab_layout.addWidget(theory_splitter, 1)
+        self.tabs.addTab(self.theory_tab, "蒸発係数 / 理論比較")
+
         visual_tab = QWidget()
         visual_layout = QVBoxLayout(visual_tab)
         visual_top_row = QHBoxLayout()
@@ -1292,6 +1458,8 @@ class MainWindow(QMainWindow):
         self.contact_angle_plot.clear("接触角-時間")
         self.contact_radius_plot.clear("接触半径-時間")
         self.evap_plot.clear("蒸発完了時刻")
+        self.theory_em_plot.clear("蒸発量 EM-時間")
+        self.theory_radius_plot.clear("理論/MD 等価半径-時間")
 
         log_group = QGroupBox("ログ")
         log_layout = QVBoxLayout(log_group)
@@ -1318,6 +1486,32 @@ class MainWindow(QMainWindow):
         self.export_png_button.clicked.connect(self.export_png)
         self.table.itemSelectionChanged.connect(self.update_selected_case_plots)
         self.tabs.currentChanged.connect(self.on_result_tab_changed)
+        self.theory_preset_combo.currentTextChanged.connect(self.apply_theory_preset)
+        for widget in (
+            self.theory_show_md_check,
+            self.theory_show_fit_check,
+            *self.theory_alpha_checks.values(),
+        ):
+            widget.stateChanged.connect(lambda _: self.update_theory_plots())
+        for widget in (
+            self.theory_rho_v_spin,
+            self.theory_rho_l_spin,
+            self.theory_temperature_spin,
+            self.theory_molecule_mass_spin,
+            self.theory_v0_source_combo,
+            self.theory_theta_source_combo,
+            self.theory_fixed_theta_spin,
+            self.theory_fit_percent_spin,
+            self.theory_fit_nonzero_check,
+            self.theory_fit_alpha_min_spin,
+            self.theory_fit_alpha_max_spin,
+        ):
+            if isinstance(widget, QComboBox):
+                widget.currentTextChanged.connect(lambda _: self.refresh_theory_outputs())
+            elif isinstance(widget, QCheckBox):
+                widget.stateChanged.connect(lambda _: self.refresh_theory_outputs())
+            else:
+                widget.valueChanged.connect(lambda _: self.refresh_theory_outputs())
         self.graph_color_button.clicked.connect(self.choose_graph_color)
         for widget in (
             self.graph_point_size_spin,
@@ -1369,6 +1563,7 @@ class MainWindow(QMainWindow):
         self.visual_png_button.clicked.connect(self.export_visual_png)
         self.visual_gif_button.clicked.connect(self.export_visual_gif)
         self.load_graph_settings_from_current_plot()
+        self.refresh_theory_outputs()
 
     @Slot(int)
     def select_table_column(self, column: int) -> None:
@@ -1382,7 +1577,7 @@ class MainWindow(QMainWindow):
 
     def _scientific_spin(self, value: float) -> QDoubleSpinBox:
         spin = ScientificDoubleSpinBox()
-        spin.setDecimals(16)
+        spin.setDecimals(323)
         spin.setRange(0.0, 1.0e100)
         spin.setSingleStep(1.0)
         spin.setValue(value)
@@ -1426,6 +1621,7 @@ class MainWindow(QMainWindow):
         self.remote_cases = []
         self.loaded_source = ""
         self.update_visual_controls(None)
+        self.update_theory_plots(None)
 
     def _load_ssh_profile(self) -> None:
         profile = _load_profile_settings()
@@ -1668,6 +1864,87 @@ class MainWindow(QMainWindow):
             contact_average_percent=self.contact_average_percent_spin.value(),
         )
 
+    def theory_settings(self) -> TheorySettings:
+        v0_source = "first_volume" if self.theory_v0_source_combo.currentText() == "先頭時刻体積" else "max_volume"
+        theta_source = "fixed" if self.theory_theta_source_combo.currentText() == "固定theta" else "average"
+        return TheorySettings(
+            rho_v=self.theory_rho_v_spin.value(),
+            rho_l=self.theory_rho_l_spin.value(),
+            temperature=self.theory_temperature_spin.value(),
+            molecule_mass=self.theory_molecule_mass_spin.value(),
+            v0_source=v0_source,
+            theta_source=theta_source,
+            fixed_theta_deg=self.theory_fixed_theta_spin.value(),
+            fit_percent=self.theory_fit_percent_spin.value(),
+            fit_nonzero_only=self.theory_fit_nonzero_check.isChecked(),
+            fit_alpha_min=self.theory_fit_alpha_min_spin.value(),
+            fit_alpha_max=self.theory_fit_alpha_max_spin.value(),
+        )
+
+    @Slot(str)
+    def apply_theory_preset(self, name: str) -> None:
+        preset = THEORY_PRESETS.get(name)
+        if preset is None:
+            return
+        widgets = (
+            self.theory_rho_v_spin,
+            self.theory_rho_l_spin,
+            self.theory_temperature_spin,
+            self.theory_molecule_mass_spin,
+        )
+        for widget in widgets:
+            widget.blockSignals(True)
+        self.theory_rho_v_spin.setValue(preset.rho_v)
+        self.theory_rho_l_spin.setValue(preset.rho_l)
+        self.theory_temperature_spin.setValue(preset.temperature)
+        self.theory_molecule_mass_spin.setValue(preset.molecule_mass)
+        for widget in widgets:
+            widget.blockSignals(False)
+        self.refresh_theory_outputs()
+
+    def update_theory_control_state(self) -> None:
+        self.theory_fixed_theta_spin.setEnabled(self.theory_theta_source_combo.currentText() == "固定theta")
+
+    def update_theory_diagnostics(self, result: CaseResult | None = None) -> None:
+        result = result or self.current_result()
+        settings = self.theory_settings()
+        try:
+            flux = evaporation_flux(settings, 1.0)
+        except ValueError as exc:
+            self.theory_diagnostics_label.setText(str(exc))
+            return
+
+        parts = [f"J(alpha_e=1): {flux:.6g} kg/(m2*s)"]
+        theta = self._diagnostic_theta(result, settings)
+        if theta is not None:
+            try:
+                ratio = height_to_contact_radius_ratio(theta)
+                parts.append(f"theta: {theta:.6g} deg")
+                parts.append(f"h/r: {ratio:.6g}")
+            except ValueError as exc:
+                parts.append(str(exc))
+        if result is not None and result.rows and theta is not None:
+            v0 = self._diagnostic_v0(result, settings)
+            try:
+                geometry = spherical_cap_geometry(v0, theta)
+                parts.append(f"V0: {v0:.6g} m^3")
+                parts.append(f"S0: {geometry.surface_area:.6g} m^2")
+            except ValueError as exc:
+                parts.append(str(exc))
+        self.theory_diagnostics_label.setText(" / ".join(parts))
+
+    def _diagnostic_theta(self, result: CaseResult | None, settings: TheorySettings) -> float | None:
+        if settings.theta_source == "fixed":
+            return settings.fixed_theta_deg
+        if result is None:
+            return None
+        return result.average_contact_angle_deg
+
+    def _diagnostic_v0(self, result: CaseResult, settings: TheorySettings) -> float:
+        if settings.v0_source == "first_volume":
+            return result.rows[0].volume if result.rows else 0.0
+        return result.max_volume
+
     def _local_dialog_start_dir(self) -> str:
         if self.local_folder_path.exists():
             return str(self.local_folder_path)
@@ -1691,6 +1968,7 @@ class MainWindow(QMainWindow):
         self.results.clear()
         self.table.setRowCount(0)
         self.update_visual_controls(None)
+        self.update_theory_plots(None)
         self.progress.setRange(0, len(cases))
         self.progress.setValue(0)
         self.run_button.setEnabled(False)
@@ -1840,7 +2118,7 @@ class MainWindow(QMainWindow):
         plot = self.current_plot_widget()
         plot_kind = plot._last_plot[0] if plot is not None and plot._last_plot is not None else "xy"
         has_plot = plot is not None
-        x_axis_available = has_plot and plot_kind == "xy"
+        x_axis_available = has_plot and plot_kind in ("xy", "series")
         manual_axis = has_plot and not self.graph_axis_auto_check.isChecked()
         self.graph_x_min_spin.setEnabled(manual_axis and x_axis_available)
         self.graph_x_max_spin.setEnabled(manual_axis and x_axis_available)
@@ -1880,9 +2158,13 @@ class MainWindow(QMainWindow):
         self.thread = None
         self.log("解析が完了しました。")
 
+    def _theory_comparison(self, result: CaseResult) -> TheoryComparison:
+        return build_theory_comparison(result, self.theory_settings(), DEFAULT_ALPHA_VALUES)
+
     def add_result_row(self, result: CaseResult) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
+        comparison = self._theory_comparison(result)
         values = [
             result.case_name,
             str(result.time_count),
@@ -1894,6 +2176,10 @@ class MainWindow(QMainWindow):
             _fmt_optional(result.average_contact_angle_deg),
             _fmt_optional(result.initial_contact_radius),
             _fmt_optional(result.final_valid_contact_radius),
+            _fmt_optional(comparison.fit.alpha_e),
+            _fmt_optional(comparison.fit.rmse),
+            _fmt_optional(comparison.fit.r2),
+            comparison.fit.status,
             _status_label(result.status),
             result.error,
         ]
@@ -1949,6 +2235,7 @@ class MainWindow(QMainWindow):
             [point[0] for point in radius_points],
             [point[1] for point in radius_points],
         )
+        self.update_theory_plots(result)
         self.update_visual_controls(result)
 
     def current_result(self) -> CaseResult | None:
@@ -1962,6 +2249,165 @@ class MainWindow(QMainWindow):
         if result_index is None or result_index >= len(self.results):
             return None
         return self.results[result_index]
+
+    @Slot()
+    def refresh_theory_outputs(self) -> None:
+        self.update_theory_control_state()
+        self.update_theory_diagnostics()
+        self.update_theory_table_columns()
+        self.update_theory_plots()
+
+    def update_theory_table_columns(self) -> None:
+        if not self.results:
+            return
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            result_index = item.data(Qt.UserRole)
+            if result_index is None or result_index >= len(self.results):
+                continue
+            comparison = self._theory_comparison(self.results[result_index])
+            values = [
+                _fmt_optional(comparison.fit.alpha_e),
+                _fmt_optional(comparison.fit.rmse),
+                _fmt_optional(comparison.fit.r2),
+                comparison.fit.status,
+            ]
+            for column, value in zip((10, 11, 12, 13), values):
+                table_item = self.table.item(row, column)
+                if table_item is None:
+                    table_item = QTableWidgetItem(value)
+                    self.table.setItem(row, column, table_item)
+                else:
+                    table_item.setText(value)
+                table_item.setData(Qt.UserRole, result_index)
+
+    def update_theory_plots(self, result: CaseResult | None = None) -> None:
+        result = result or self.current_result()
+        self.update_theory_diagnostics(result)
+        if result is None or not result.rows:
+            self.theory_fit_label.setText("推定alpha_e: -")
+            self.theory_em_plot.clear("蒸発量 EM-時間")
+            self.theory_radius_plot.clear("理論/MD 等価半径-時間")
+            return
+
+        comparison = self._theory_comparison(result)
+        self._update_theory_fit_label(comparison)
+        if comparison.status != "ok":
+            self.theory_em_plot.clear(f"{result.case_name}: {comparison.status}")
+            self.theory_radius_plot.clear(f"{result.case_name}: {comparison.status}")
+            return
+
+        em_series: list[PlotSeries] = []
+        radius_series: list[PlotSeries] = []
+        if self.theory_show_md_check.isChecked():
+            em_series.append(
+                PlotSeries(
+                    "MD",
+                    comparison.times,
+                    comparison.md_evaporated_masses,
+                    style="scatter",
+                    color="#111111",
+                    marker="o",
+                )
+            )
+            radius_series.append(
+                PlotSeries(
+                    "MD",
+                    comparison.times,
+                    comparison.md_equivalent_radii,
+                    style="scatter",
+                    color="#111111",
+                    marker="o",
+                )
+            )
+
+        alpha_colors = {
+            0.8: "#1f77b4",
+            0.9: "#ff7f0e",
+            1.0: "#2ca02c",
+        }
+        for alpha, checkbox in self.theory_alpha_checks.items():
+            if not checkbox.isChecked():
+                continue
+            curve = comparison.curves.get(alpha)
+            if curve is None:
+                continue
+            label = f"alpha_e={alpha:g}"
+            color = alpha_colors.get(alpha)
+            em_series.append(
+                PlotSeries(label, curve.times, curve.evaporated_masses, style="line", color=color)
+            )
+            radius_series.append(
+                PlotSeries(label, curve.times, curve.equivalent_radii, style="line", color=color)
+            )
+
+        if self.theory_show_fit_check.isChecked() and comparison.fit_curve is not None:
+            fit_label = "fit"
+            if comparison.fit.alpha_e is not None:
+                fit_label = f"fit alpha_e={comparison.fit.alpha_e:.4g}"
+                if comparison.fit.boundary:
+                    fit_label += f" ({comparison.fit.boundary})"
+            em_series.append(
+                PlotSeries(
+                    fit_label,
+                    comparison.fit_curve.times,
+                    comparison.fit_curve.evaporated_masses,
+                    style="line",
+                    color="#d62728",
+                    linestyle="--",
+                    linewidth=1.8,
+                )
+            )
+            radius_series.append(
+                PlotSeries(
+                    fit_label,
+                    comparison.fit_curve.times,
+                    comparison.fit_curve.equivalent_radii,
+                    style="line",
+                    color="#d62728",
+                    linestyle="--",
+                    linewidth=1.8,
+                )
+            )
+
+        self.theory_em_plot.plot_series(
+            f"{result.case_name}: 蒸発量 EM-時間",
+            "時間 [s]",
+            "蒸発量 EM [kg]",
+            em_series,
+        )
+        self.theory_radius_plot.plot_series(
+            f"{result.case_name}: 理論/MD 等価半径-時間",
+            "時間 [s]",
+            "等価半径 [m]",
+            radius_series,
+        )
+
+    def _update_theory_fit_label(self, comparison: TheoryComparison) -> None:
+        if comparison.status != "ok":
+            self.theory_fit_label.setText(f"理論比較: {comparison.status}")
+            return
+        fit = comparison.fit
+        if fit.alpha_e is None:
+            self.theory_fit_label.setText(
+                f"V0: {_fmt_optional(comparison.v0)} / theta: {_fmt_optional(comparison.theta_deg)} / {fit.status}"
+            )
+            return
+        self.theory_fit_label.setText(
+            " / ".join(
+                [
+                    f"V0: {_fmt_optional(comparison.v0)}",
+                    f"theta: {_fmt_optional(comparison.theta_deg)} deg",
+                    f"alpha_e: {_fmt(fit.alpha_e)}",
+                    f"RMSE: {_fmt_optional(fit.rmse)}",
+                    f"R^2: {_fmt_optional(fit.r2)}",
+                    f"fit点: {fit.point_count}",
+                    f"fit状態: {fit.status}",
+                ]
+            )
+        )
 
     def update_visual_controls(self, result: CaseResult | None = None) -> None:
         result = result or self.current_result()
@@ -2163,6 +2609,9 @@ class MainWindow(QMainWindow):
         out_dir = Path(directory)
         write_summary_csv(out_dir / "mdfoam_summary.csv", self.results)
         write_timeseries_csv(out_dir / "mdfoam_timeseries.csv", self.results)
+        theory_settings = self.theory_settings()
+        write_theory_summary_csv(out_dir / "mdfoam_theory_summary.csv", self.results, theory_settings, DEFAULT_ALPHA_VALUES)
+        write_theory_timeseries_csv(out_dir / "mdfoam_theory_timeseries.csv", self.results, theory_settings, DEFAULT_ALPHA_VALUES)
         self.log(f"CSVを出力しました: {out_dir}")
 
     @Slot()
