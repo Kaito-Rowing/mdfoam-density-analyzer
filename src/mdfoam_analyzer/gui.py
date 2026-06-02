@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import traceback
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -53,6 +57,7 @@ import numpy as np
 from .analysis import (
     AnalysisSettings,
     CaseResult,
+    TimeResult,
     analyze_case,
     discover_cases,
     discover_fields_for_cases,
@@ -103,6 +108,12 @@ rcParams["font.family"] = ["Yu Gothic", "Meiryo", "MS Gothic", "DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
 THREE_D_AUTO_MAX_POINTS = 50_000
+QUALITY_DPI_OPTIONS = {
+    "低 150dpi": 150,
+    "標準 300dpi": 300,
+    "高 600dpi": 600,
+}
+DEFAULT_QUALITY_LABEL = "標準 300dpi"
 
 
 @dataclass
@@ -115,6 +126,7 @@ class GraphSettings:
     axis_labels_visible: bool = True
     tick_labels_visible: bool = True
     grid_visible: bool = True
+    axis_mode: str = "auto_fixed"
     axis_auto: bool = True
     x_min: float = 0.0
     x_max: float = 1.0
@@ -126,7 +138,7 @@ class GraphSettings:
     marker: str = "o"
     image_width: float = 8.0
     image_height: float = 5.0
-    dpi: int = 180
+    dpi: int = 300
     transparent: bool = False
 
 
@@ -418,6 +430,35 @@ class PlotWidget(QWidget):
             bbox_inches="tight",
         )
 
+    def copy_plot_state_from(self, other: "PlotWidget") -> None:
+        self.settings = GraphSettings(**vars(other.settings))
+        self._last_plot = None
+        if other._last_plot is not None:
+            kind, title, x_label, y_label, x, y = other._last_plot
+            self._last_plot = (kind, title, x_label, y_label, list(x), list(y))
+        self._last_series = None
+        if other._last_series is not None:
+            title, x_label, y_label, series = other._last_series
+            self._last_series = (
+                title,
+                x_label,
+                y_label,
+                [
+                    PlotSeries(
+                        item.label,
+                        list(item.x),
+                        list(item.y),
+                        item.style,
+                        item.color,
+                        item.marker,
+                        item.linestyle,
+                        item.linewidth,
+                    )
+                    for item in series
+                ],
+            )
+        self.redraw()
+
     def _apply_common_style(
         self,
         axis,
@@ -442,7 +483,7 @@ class PlotWidget(QWidget):
             labelleft=settings.tick_labels_visible,
         )
         axis.grid(settings.grid_visible, alpha=0.3)
-        if not settings.axis_auto:
+        if settings.axis_mode in ("auto_fixed", "manual_fixed") or not settings.axis_auto:
             if not is_bar and settings.x_min < settings.x_max:
                 axis.set_xlim(settings.x_min, settings.x_max)
             if settings.y_min < settings.y_max:
@@ -451,6 +492,348 @@ class PlotWidget(QWidget):
             axis.set_aspect("equal", adjustable="box")
         else:
             axis.set_aspect("auto")
+
+
+class CombinedPlotWidget(QWidget):
+    def __init__(self, source_plots: list[PlotWidget], owns_source_plots: bool = False) -> None:
+        super().__init__()
+        self.figure = Figure(figsize=(8, 5), tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.source_plots = source_plots
+        self.owns_source_plots = owns_source_plots
+        self.settings = GraphSettings(**vars(source_plots[0].settings)) if source_plots else GraphSettings()
+        self.settings.image_height = min(30.0, max(self.settings.image_height, self.settings.image_height * max(1, len(source_plots))))
+        self._last_plot = source_plots[0]._last_plot if source_plots else None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.canvas)
+        self.redraw()
+
+    def redraw(self) -> None:
+        self.figure.clear()
+        if not self.source_plots:
+            axis = self.figure.add_subplot(111)
+            axis.set_axis_off()
+            self.canvas.draw_idle()
+            return
+        axes = self.figure.subplots(len(self.source_plots), 1, squeeze=False)
+        for axis, plot in zip(axes[:, 0], self.source_plots):
+            _draw_plot_on_axis(plot, axis, self._settings_for_source_plot(plot))
+        self.figure.tight_layout()
+        self.canvas.draw_idle()
+
+    def _settings_for_source_plot(self, plot: PlotWidget) -> GraphSettings:
+        settings = GraphSettings(**vars(self.settings))
+        settings.axis_mode = plot.settings.axis_mode
+        settings.axis_auto = plot.settings.axis_auto
+        settings.x_min = plot.settings.x_min
+        settings.x_max = plot.settings.x_max
+        settings.y_min = plot.settings.y_min
+        settings.y_max = plot.settings.y_max
+        settings.x_log = plot.settings.x_log
+        settings.y_log = plot.settings.y_log
+        return settings
+
+    def save_png(self, path: Path) -> None:
+        self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
+        self.figure.tight_layout()
+        self.figure.savefig(
+            path,
+            dpi=self.settings.dpi,
+            transparent=self.settings.transparent,
+            bbox_inches="tight",
+        )
+
+    def closeEvent(self, event) -> None:
+        if self.owns_source_plots:
+            for plot in self.source_plots:
+                plot.close()
+        super().closeEvent(event)
+
+
+class GraphPngPreviewDialog(QDialog):
+    def __init__(
+        self,
+        source_plot: PlotWidget | list[tuple[str, PlotWidget | list[PlotWidget]] | tuple[str, PlotWidget | list[PlotWidget], str]],
+        start_dir: str,
+        parent: QWidget | None = None,
+        suggested_filename: str = "graph.png",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("PNG出力プレビュー")
+        self.resize(1100, 760)
+        self.start_dir = start_dir
+        self.suggested_filename = suggested_filename
+        self.saved_path: Path | None = None
+        if isinstance(source_plot, list):
+            self.source_options = [
+                (item[0], item[1] if isinstance(item[1], list) else [item[1]], item[2] if len(item) >= 3 else suggested_filename)
+                for item in source_plot
+            ]
+        else:
+            self.source_options = [("グラフ", [source_plot], suggested_filename)]
+
+        self.preview_widgets: list[PlotWidget | CombinedPlotWidget] = []
+        for _label, plots, _filename in self.source_options:
+            if len(plots) == 1:
+                preview = PlotWidget()
+                preview.copy_plot_state_from(plots[0])
+            else:
+                preview = CombinedPlotWidget(plots)
+            self.preview_widgets.append(preview)
+        self.preview_plot: PlotWidget | CombinedPlotWidget = self.preview_widgets[0]
+
+        layout = QVBoxLayout(self)
+        body = QHBoxLayout()
+        layout.addLayout(body, 1)
+
+        settings_group = QGroupBox("グラフ表示設定")
+        settings_layout = QVBoxLayout(settings_group)
+        body.addWidget(settings_group, 0)
+        self.preview_stack = QStackedWidget()
+        for widget in self.preview_widgets:
+            self.preview_stack.addWidget(widget)
+        body.addWidget(self.preview_stack, 1)
+
+        self.source_combo: QComboBox | None = None
+        if len(self.source_options) > 1:
+            source_row = QHBoxLayout()
+            self.source_combo = QComboBox()
+            self.source_combo.addItems([label for label, _plots, _filename in self.source_options])
+            source_row.addWidget(QLabel("保存するグラフ"))
+            source_row.addWidget(self.source_combo)
+            settings_layout.addLayout(source_row)
+
+        color_row = QHBoxLayout()
+        self.color_button = QPushButton("色")
+        self.point_size_spin = self._double_spin(1.0, 200.0, 1, self.preview_plot.settings.point_size)
+        self.alpha_spin = self._double_spin(0.05, 1.0, 2, self.preview_plot.settings.point_alpha, 0.05)
+        color_row.addWidget(QLabel("点色"))
+        color_row.addWidget(self.color_button)
+        color_row.addWidget(QLabel("点サイズ"))
+        color_row.addWidget(self.point_size_spin)
+        color_row.addWidget(QLabel("透明度"))
+        color_row.addWidget(self.alpha_spin)
+        settings_layout.addLayout(color_row)
+
+        style_row = QHBoxLayout()
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(6, 40)
+        self.font_size_spin.setValue(self.preview_plot.settings.font_size)
+        self.font_size_spin.setKeyboardTracking(False)
+        self.marker_combo = QComboBox()
+        self.marker_combo.addItems(["o", "s", "^", "D", "x", "+", "."])
+        self.marker_combo.setCurrentText(self.preview_plot.settings.marker)
+        self.aspect_combo = QComboBox()
+        self.aspect_combo.addItems(["自動", "等倍"])
+        self.aspect_combo.setCurrentText(self.preview_plot.settings.aspect)
+        style_row.addWidget(QLabel("文字"))
+        style_row.addWidget(self.font_size_spin)
+        style_row.addWidget(QLabel("マーカー"))
+        style_row.addWidget(self.marker_combo)
+        style_row.addWidget(QLabel("縦横"))
+        style_row.addWidget(self.aspect_combo)
+        settings_layout.addLayout(style_row)
+
+        visibility_row = QHBoxLayout()
+        self.title_check = QCheckBox("タイトル")
+        self.axis_label_check = QCheckBox("軸ラベル")
+        self.tick_label_check = QCheckBox("目盛")
+        self.grid_check = QCheckBox("グリッド")
+        visibility_row.addWidget(self.title_check)
+        visibility_row.addWidget(self.axis_label_check)
+        visibility_row.addWidget(self.tick_label_check)
+        visibility_row.addWidget(self.grid_check)
+        settings_layout.addLayout(visibility_row)
+
+        axis_group = QGroupBox("軸")
+        axis_layout = QFormLayout(axis_group)
+        self.axis_auto_check = QCheckBox("自動")
+        self.x_min_spin = self._signed_spin(self.preview_plot.settings.x_min)
+        self.x_max_spin = self._signed_spin(self.preview_plot.settings.x_max)
+        self.y_min_spin = self._signed_spin(self.preview_plot.settings.y_min)
+        self.y_max_spin = self._signed_spin(self.preview_plot.settings.y_max)
+        self.x_log_check = QCheckBox("x対数")
+        self.y_log_check = QCheckBox("y対数")
+        axis_layout.addRow("", self.axis_auto_check)
+        axis_layout.addRow("x最小", self.x_min_spin)
+        axis_layout.addRow("x最大", self.x_max_spin)
+        axis_layout.addRow("y最小", self.y_min_spin)
+        axis_layout.addRow("y最大", self.y_max_spin)
+        axis_layout.addRow("", self.x_log_check)
+        axis_layout.addRow("", self.y_log_check)
+        settings_layout.addWidget(axis_group)
+
+        output_group = QGroupBox("PNG")
+        output_layout = QFormLayout(output_group)
+        self.width_spin = self._double_spin(1.0, 30.0, 1, self.preview_plot.settings.image_width)
+        self.height_spin = self._double_spin(1.0, 30.0, 1, self.preview_plot.settings.image_height)
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems(list(QUALITY_DPI_OPTIONS.keys()))
+        self.quality_combo.setCurrentText(_quality_label_for_dpi(self.preview_plot.settings.dpi))
+        self.transparent_check = QCheckBox("透明背景")
+        output_layout.addRow("幅 [in]", self.width_spin)
+        output_layout.addRow("高さ [in]", self.height_spin)
+        output_layout.addRow("画質", self.quality_combo)
+        output_layout.addRow("", self.transparent_check)
+        settings_layout.addWidget(output_group)
+        settings_layout.addStretch(1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Save).setText("保存")
+        buttons.button(QDialogButtonBox.Cancel).setText("キャンセル")
+        layout.addWidget(buttons)
+
+        self._load_controls_from_preview()
+        self._connect_controls()
+        buttons.button(QDialogButtonBox.Save).clicked.connect(self.save_png)
+        buttons.rejected.connect(self.reject)
+
+    def _double_spin(
+        self,
+        minimum: float,
+        maximum: float,
+        decimals: int,
+        value: float,
+        step: float = 1.0,
+    ) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setDecimals(decimals)
+        spin.setSingleStep(step)
+        spin.setValue(value)
+        spin.setKeyboardTracking(False)
+        return spin
+
+    def _signed_spin(self, value: float) -> QDoubleSpinBox:
+        spin = SignedScientificDoubleSpinBox()
+        spin.setRange(-1.0e100, 1.0e100)
+        spin.setSingleStep(1.0)
+        spin.setValue(value)
+        spin.setKeyboardTracking(False)
+        return spin
+
+    def _load_controls_from_preview(self) -> None:
+        settings = self.preview_plot.settings
+        self._set_color_button(settings.point_color)
+        self.title_check.setChecked(settings.title_visible)
+        self.axis_label_check.setChecked(settings.axis_labels_visible)
+        self.tick_label_check.setChecked(settings.tick_labels_visible)
+        self.grid_check.setChecked(settings.grid_visible)
+        self.axis_auto_check.setChecked(settings.axis_auto)
+        self.x_log_check.setChecked(settings.x_log)
+        self.y_log_check.setChecked(settings.y_log)
+        self.transparent_check.setChecked(settings.transparent)
+        self._update_axis_spin_enabled()
+
+    def _connect_controls(self) -> None:
+        if self.source_combo is not None:
+            self.source_combo.currentIndexChanged.connect(self.on_source_changed)
+        self.color_button.clicked.connect(self.choose_color)
+        for widget in (
+            self.point_size_spin,
+            self.alpha_spin,
+            self.font_size_spin,
+            self.marker_combo,
+            self.aspect_combo,
+            self.title_check,
+            self.axis_label_check,
+            self.tick_label_check,
+            self.grid_check,
+            self.axis_auto_check,
+            self.x_min_spin,
+            self.x_max_spin,
+            self.y_min_spin,
+            self.y_max_spin,
+            self.x_log_check,
+            self.y_log_check,
+            self.width_spin,
+            self.height_spin,
+            self.quality_combo,
+            self.transparent_check,
+        ):
+            if isinstance(widget, QComboBox):
+                widget.currentTextChanged.connect(lambda _: self.apply_settings())
+            elif isinstance(widget, QCheckBox):
+                widget.stateChanged.connect(lambda _: self.apply_settings())
+            else:
+                widget.valueChanged.connect(lambda _: self.apply_settings())
+
+    @Slot()
+    def choose_color(self) -> None:
+        color = QColorDialog.getColor(QColor(self.preview_plot.settings.point_color), self, "点色")
+        if not color.isValid():
+            return
+        self.preview_plot.settings.point_color = color.name()
+        self._set_color_button(color.name())
+        self.preview_plot.redraw()
+
+    @Slot(int)
+    def on_source_changed(self, index: int) -> None:
+        if index < 0 or index >= len(self.source_options):
+            return
+        self.preview_stack.setCurrentIndex(index)
+        self.preview_plot = self.preview_widgets[index]
+        if isinstance(self.preview_plot, CombinedPlotWidget):
+            self.height_spin.blockSignals(True)
+            self.height_spin.setValue(self.preview_plot.settings.image_height)
+            self.height_spin.blockSignals(False)
+        self.apply_settings()
+
+    @Slot()
+    def apply_settings(self) -> None:
+        settings = self.preview_plot.settings
+        settings.point_size = self.point_size_spin.value()
+        settings.point_alpha = self.alpha_spin.value()
+        settings.font_size = self.font_size_spin.value()
+        settings.marker = self.marker_combo.currentText()
+        settings.aspect = self.aspect_combo.currentText()
+        settings.title_visible = self.title_check.isChecked()
+        settings.axis_labels_visible = self.axis_label_check.isChecked()
+        settings.tick_labels_visible = self.tick_label_check.isChecked()
+        settings.grid_visible = self.grid_check.isChecked()
+        settings.axis_auto = self.axis_auto_check.isChecked()
+        settings.x_min = self.x_min_spin.value()
+        settings.x_max = self.x_max_spin.value()
+        settings.y_min = self.y_min_spin.value()
+        settings.y_max = self.y_max_spin.value()
+        settings.x_log = self.x_log_check.isChecked()
+        settings.y_log = self.y_log_check.isChecked()
+        settings.image_width = self.width_spin.value()
+        settings.image_height = self.height_spin.value()
+        settings.dpi = QUALITY_DPI_OPTIONS.get(self.quality_combo.currentText(), QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
+        settings.transparent = self.transparent_check.isChecked()
+        self._update_axis_spin_enabled()
+        self.preview_plot.figure.set_size_inches(settings.image_width, settings.image_height, forward=False)
+        self.preview_plot.redraw()
+
+    def _update_axis_spin_enabled(self) -> None:
+        plot_kind = self.preview_plot._last_plot[0] if self.preview_plot._last_plot is not None else "xy"
+        x_axis_available = plot_kind in ("xy", "series")
+        manual_axis = not self.axis_auto_check.isChecked()
+        self.x_min_spin.setEnabled(manual_axis and x_axis_available)
+        self.x_max_spin.setEnabled(manual_axis and x_axis_available)
+        self.y_min_spin.setEnabled(manual_axis)
+        self.y_max_spin.setEnabled(manual_axis)
+        self.x_log_check.setEnabled(x_axis_available)
+
+    def _set_color_button(self, color: str) -> None:
+        self.color_button.setStyleSheet(f"background-color: {color};")
+
+    @Slot()
+    def save_png(self) -> None:
+        index = self.source_combo.currentIndex() if self.source_combo is not None else 0
+        filename = self.source_options[index][2] if 0 <= index < len(self.source_options) else self.suggested_filename
+        start_path = str(Path(self.start_dir) / filename)
+        path, _ = QFileDialog.getSaveFileName(self, "現在のグラフを保存", start_path, "PNG (*.png)")
+        if not path:
+            return
+        output_path = Path(path)
+        if output_path.suffix.lower() != ".png":
+            output_path = output_path.with_suffix(".png")
+        self.preview_plot.save_png(output_path)
+        self.saved_path = output_path
+        self.accept()
 
 
 class VisualizationPlotWidget(QWidget):
@@ -926,10 +1309,17 @@ class MainWindow(QMainWindow):
         self.remote_browser_path = ""
         self._last_visual_downsample_message = ""
         self.results: list[CaseResult] = []
+        self._theory_comparison_cache: dict[tuple[int, TheorySettings], TheoryComparison] = {}
+        self._auto_axis_ranges: dict[str, tuple[float, float, float, float]] = {}
         self.worker: AnalyzerWorker | None = None
         self.thread: QThread | None = None
+        self._theory_refresh_timer = QTimer(self)
+        self._theory_refresh_timer.setSingleShot(True)
+        self._theory_refresh_timer.setInterval(250)
+        self._theory_refresh_timer.timeout.connect(self.refresh_theory_outputs)
 
         self._build_ui()
+        self._configure_spinbox_input_behavior()
         self._load_ssh_profile()
         self._set_source_mode("ローカル")
         self._connect_signals()
@@ -1175,9 +1565,11 @@ class MainWindow(QMainWindow):
         export_row = QHBoxLayout()
         self.export_csv_button = QPushButton("CSV出力")
         self.export_png_button = QPushButton("PNG出力")
+        self.export_all_png_button = QPushButton("全ケースPNG出力")
         export_row.addStretch(1)
         export_row.addWidget(self.export_csv_button)
         export_row.addWidget(self.export_png_button)
+        export_row.addWidget(self.export_all_png_button)
         results_layout.addLayout(export_row)
 
         graph_settings_group = QGroupBox("グラフ表示設定")
@@ -1221,14 +1613,20 @@ class MainWindow(QMainWindow):
         graph_settings_layout.addLayout(graph_row1)
 
         graph_row2 = QHBoxLayout()
-        self.graph_axis_auto_check = QCheckBox("軸自動")
+        self.graph_axis_target_combo = QComboBox()
+        self.graph_axis_target_combo.addItem("現在グラフ", "")
+        self.graph_axis_mode_combo = QComboBox()
+        self.graph_axis_mode_combo.addItems(["自動固定", "手動固定"])
         self.graph_x_min_spin = self._signed_scientific_spin(0.0)
         self.graph_x_max_spin = self._signed_scientific_spin(1.0)
         self.graph_y_min_spin = self._signed_scientific_spin(0.0)
         self.graph_y_max_spin = self._signed_scientific_spin(1.0)
         self.graph_x_log_check = QCheckBox("x対数")
         self.graph_y_log_check = QCheckBox("y対数")
-        graph_row2.addWidget(self.graph_axis_auto_check)
+        graph_row2.addWidget(QLabel("軸対象"))
+        graph_row2.addWidget(self.graph_axis_target_combo)
+        graph_row2.addWidget(QLabel("軸モード"))
+        graph_row2.addWidget(self.graph_axis_mode_combo)
         graph_row2.addWidget(QLabel("x最小"))
         graph_row2.addWidget(self.graph_x_min_spin)
         graph_row2.addWidget(QLabel("x最大"))
@@ -1249,15 +1647,15 @@ class MainWindow(QMainWindow):
         self.graph_height_spin = QDoubleSpinBox()
         self.graph_height_spin.setRange(1.0, 30.0)
         self.graph_height_spin.setDecimals(1)
-        self.graph_dpi_spin = QSpinBox()
-        self.graph_dpi_spin.setRange(72, 1200)
+        self.graph_quality_combo = QComboBox()
+        self.graph_quality_combo.addItems(list(QUALITY_DPI_OPTIONS.keys()))
         self.graph_transparent_check = QCheckBox("透明背景")
         graph_row3.addWidget(QLabel("PNG幅[in]"))
         graph_row3.addWidget(self.graph_width_spin)
         graph_row3.addWidget(QLabel("PNG高さ[in]"))
         graph_row3.addWidget(self.graph_height_spin)
-        graph_row3.addWidget(QLabel("DPI"))
-        graph_row3.addWidget(self.graph_dpi_spin)
+        graph_row3.addWidget(QLabel("画質"))
+        graph_row3.addWidget(self.graph_quality_combo)
         graph_row3.addWidget(self.graph_transparent_check)
         graph_row3.addStretch(1)
         graph_settings_layout.addLayout(graph_row3)
@@ -1352,8 +1750,8 @@ class MainWindow(QMainWindow):
         theory_tab_layout.addWidget(theory_splitter, 1)
         self.tabs.addTab(self.theory_tab, "蒸発係数 / 理論比較")
 
-        visual_tab = QWidget()
-        visual_layout = QVBoxLayout(visual_tab)
+        self.visual_tab = QWidget()
+        visual_layout = QVBoxLayout(self.visual_tab)
         visual_top_row = QHBoxLayout()
         self.visual_case_label = QLabel("ケース: -")
         self.visual_time_label = QLabel("時刻: -")
@@ -1446,7 +1844,7 @@ class MainWindow(QMainWindow):
         visual_layout.addLayout(visual_export_row)
         visual_layout.addWidget(self.visual_plot, 1)
         self.visual_plot.clear()
-        self.tabs.addTab(visual_tab, "可視化")
+        self.tabs.addTab(self.visual_tab, "可視化")
         results_splitter = QSplitter(Qt.Vertical)
         results_splitter.addWidget(self.table)
         results_splitter.addWidget(self.tabs)
@@ -1469,6 +1867,12 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self.log_box)
         root_layout.addWidget(log_group)
 
+    def _configure_spinbox_input_behavior(self) -> None:
+        for spin in self.findChildren(QSpinBox):
+            spin.setKeyboardTracking(False)
+        for spin in self.findChildren(QDoubleSpinBox):
+            spin.setKeyboardTracking(False)
+
     def _connect_signals(self) -> None:
         self.source_combo.currentTextChanged.connect(self._set_source_mode)
         self.browse_button.clicked.connect(self.choose_folder)
@@ -1484,6 +1888,7 @@ class MainWindow(QMainWindow):
         self.stop_button.clicked.connect(self.stop_analysis)
         self.export_csv_button.clicked.connect(self.export_csv)
         self.export_png_button.clicked.connect(self.export_png)
+        self.export_all_png_button.clicked.connect(self.export_all_png)
         self.table.itemSelectionChanged.connect(self.update_selected_case_plots)
         self.tabs.currentChanged.connect(self.on_result_tab_changed)
         self.theory_preset_combo.currentTextChanged.connect(self.apply_theory_preset)
@@ -1492,7 +1897,7 @@ class MainWindow(QMainWindow):
             self.theory_show_fit_check,
             *self.theory_alpha_checks.values(),
         ):
-            widget.stateChanged.connect(lambda _: self.update_theory_plots())
+            widget.stateChanged.connect(lambda _: self.refresh_theory_plot_visibility())
         for widget in (
             self.theory_rho_v_spin,
             self.theory_rho_l_spin,
@@ -1507,11 +1912,11 @@ class MainWindow(QMainWindow):
             self.theory_fit_alpha_max_spin,
         ):
             if isinstance(widget, QComboBox):
-                widget.currentTextChanged.connect(lambda _: self.refresh_theory_outputs())
+                widget.currentTextChanged.connect(lambda _: self.schedule_theory_outputs_refresh())
             elif isinstance(widget, QCheckBox):
-                widget.stateChanged.connect(lambda _: self.refresh_theory_outputs())
+                widget.stateChanged.connect(lambda _: self.schedule_theory_outputs_refresh())
             else:
-                widget.valueChanged.connect(lambda _: self.refresh_theory_outputs())
+                widget.valueChanged.connect(lambda _: self.schedule_theory_outputs_refresh())
         self.graph_color_button.clicked.connect(self.choose_graph_color)
         for widget in (
             self.graph_point_size_spin,
@@ -1523,7 +1928,7 @@ class MainWindow(QMainWindow):
             self.graph_axis_label_check,
             self.graph_tick_label_check,
             self.graph_grid_check,
-            self.graph_axis_auto_check,
+            self.graph_axis_mode_combo,
             self.graph_x_min_spin,
             self.graph_x_max_spin,
             self.graph_y_min_spin,
@@ -1532,7 +1937,7 @@ class MainWindow(QMainWindow):
             self.graph_y_log_check,
             self.graph_width_spin,
             self.graph_height_spin,
-            self.graph_dpi_spin,
+            self.graph_quality_combo,
             self.graph_transparent_check,
         ):
             if isinstance(widget, QComboBox):
@@ -1541,6 +1946,7 @@ class MainWindow(QMainWindow):
                 widget.stateChanged.connect(lambda _: self.on_graph_settings_changed())
             else:
                 widget.valueChanged.connect(lambda _: self.on_graph_settings_changed())
+        self.graph_axis_target_combo.currentIndexChanged.connect(lambda _: self.load_graph_settings_from_current_plot())
         self.visual_time_slider.valueChanged.connect(self.on_visual_time_changed)
         self.visual_prev_button.clicked.connect(lambda: self.set_visual_time_index(self.visual_time_slider.value() - 1))
         self.visual_next_button.clicked.connect(lambda: self.set_visual_time_index(self.visual_time_slider.value() + 1))
@@ -1598,6 +2004,12 @@ class MainWindow(QMainWindow):
         spin.setValue(value)
         return spin
 
+    def _clear_results(self) -> None:
+        self.results.clear()
+        self._theory_comparison_cache.clear()
+        self._auto_axis_ranges.clear()
+        self.table.setRowCount(0)
+
     @Slot(str)
     def _set_source_mode(self, mode: str) -> None:
         is_remote = mode == "SSH"
@@ -1615,8 +2027,7 @@ class MainWindow(QMainWindow):
         self.case_list.clear()
         self.field_combo.clear()
         self.field_combo.addItem("rhoM_water")
-        self.results.clear()
-        self.table.setRowCount(0)
+        self._clear_results()
         self.cases = []
         self.remote_cases = []
         self.loaded_source = ""
@@ -1776,8 +2187,7 @@ class MainWindow(QMainWindow):
         self.folder_edit.setText(str(path))
         self.case_list.clear()
         self.field_combo.clear()
-        self.results.clear()
-        self.table.setRowCount(0)
+        self._clear_results()
         self.update_visual_controls(None)
         self.remote_cases = []
         self.loaded_source = "ローカル"
@@ -1810,8 +2220,7 @@ class MainWindow(QMainWindow):
         self.remote_path_edit.setText(path)
         self.case_list.clear()
         self.field_combo.clear()
-        self.results.clear()
-        self.table.setRowCount(0)
+        self._clear_results()
         self.update_visual_controls(None)
         self.cases = []
         self.loaded_source = "SSH"
@@ -1965,8 +2374,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "SSH設定エラー", str(exc))
                 return
 
-        self.results.clear()
-        self.table.setRowCount(0)
+        self._clear_results()
         self.update_visual_controls(None)
         self.update_theory_plots(None)
         self.progress.setRange(0, len(cases))
@@ -1991,7 +2399,12 @@ class MainWindow(QMainWindow):
 
     def current_plot_widget(self) -> PlotWidget | None:
         tab = self.tabs.currentWidget()
-        return tab if isinstance(tab, PlotWidget) else None
+        if isinstance(tab, PlotWidget):
+            return tab
+        if tab is self.theory_tab:
+            target = self.graph_axis_target_combo.currentData() if hasattr(self, "graph_axis_target_combo") else ""
+            return self.theory_radius_plot if target == "theory_equivalent_radius" else self.theory_em_plot
+        return None
 
     @Slot()
     def choose_graph_color(self) -> None:
@@ -2007,9 +2420,24 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def on_result_tab_changed(self) -> None:
+        self.refresh_current_result_tab()
         self.load_graph_settings_from_current_plot()
 
     def load_graph_settings_from_current_plot(self) -> None:
+        is_theory_tab = self.tabs.currentWidget() is self.theory_tab
+        current_target = self.graph_axis_target_combo.currentData()
+        self.graph_axis_target_combo.blockSignals(True)
+        self.graph_axis_target_combo.clear()
+        if is_theory_tab:
+            self.graph_axis_target_combo.addItem("蒸発量 EM", "theory_evaporated_mass")
+            self.graph_axis_target_combo.addItem("理論/MD 等価半径", "theory_equivalent_radius")
+            index = self.graph_axis_target_combo.findData(current_target)
+            self.graph_axis_target_combo.setCurrentIndex(index if index >= 0 else 0)
+            self.graph_axis_target_combo.setEnabled(True)
+        else:
+            self.graph_axis_target_combo.addItem("現在グラフ", "")
+            self.graph_axis_target_combo.setEnabled(False)
+        self.graph_axis_target_combo.blockSignals(False)
         plot = self.current_plot_widget()
         enabled = plot is not None
         for widget in (
@@ -2023,7 +2451,7 @@ class MainWindow(QMainWindow):
             self.graph_axis_label_check,
             self.graph_tick_label_check,
             self.graph_grid_check,
-            self.graph_axis_auto_check,
+            self.graph_axis_mode_combo,
             self.graph_x_min_spin,
             self.graph_x_max_spin,
             self.graph_y_min_spin,
@@ -2032,7 +2460,7 @@ class MainWindow(QMainWindow):
             self.graph_y_log_check,
             self.graph_width_spin,
             self.graph_height_spin,
-            self.graph_dpi_spin,
+            self.graph_quality_combo,
             self.graph_transparent_check,
         ):
             widget.blockSignals(True)
@@ -2049,7 +2477,7 @@ class MainWindow(QMainWindow):
             self.graph_axis_label_check.setChecked(settings.axis_labels_visible)
             self.graph_tick_label_check.setChecked(settings.tick_labels_visible)
             self.graph_grid_check.setChecked(settings.grid_visible)
-            self.graph_axis_auto_check.setChecked(settings.axis_auto)
+            self.graph_axis_mode_combo.setCurrentText("手動固定" if settings.axis_mode == "manual_fixed" else "自動固定")
             self.graph_x_min_spin.setValue(settings.x_min)
             self.graph_x_max_spin.setValue(settings.x_max)
             self.graph_y_min_spin.setValue(settings.y_min)
@@ -2058,7 +2486,7 @@ class MainWindow(QMainWindow):
             self.graph_y_log_check.setChecked(settings.y_log)
             self.graph_width_spin.setValue(settings.image_width)
             self.graph_height_spin.setValue(settings.image_height)
-            self.graph_dpi_spin.setValue(settings.dpi)
+            self.graph_quality_combo.setCurrentText(_quality_label_for_dpi(settings.dpi))
             self.graph_transparent_check.setChecked(settings.transparent)
         for widget in (
             self.graph_color_button,
@@ -2071,7 +2499,7 @@ class MainWindow(QMainWindow):
             self.graph_axis_label_check,
             self.graph_tick_label_check,
             self.graph_grid_check,
-            self.graph_axis_auto_check,
+            self.graph_axis_mode_combo,
             self.graph_x_min_spin,
             self.graph_x_max_spin,
             self.graph_y_min_spin,
@@ -2080,7 +2508,7 @@ class MainWindow(QMainWindow):
             self.graph_y_log_check,
             self.graph_width_spin,
             self.graph_height_spin,
-            self.graph_dpi_spin,
+            self.graph_quality_combo,
             self.graph_transparent_check,
         ):
             widget.blockSignals(False)
@@ -2100,7 +2528,8 @@ class MainWindow(QMainWindow):
         settings.axis_labels_visible = self.graph_axis_label_check.isChecked()
         settings.tick_labels_visible = self.graph_tick_label_check.isChecked()
         settings.grid_visible = self.graph_grid_check.isChecked()
-        settings.axis_auto = self.graph_axis_auto_check.isChecked()
+        settings.axis_mode = "manual_fixed" if self.graph_axis_mode_combo.currentText() == "手動固定" else "auto_fixed"
+        settings.axis_auto = settings.axis_mode != "manual_fixed"
         settings.x_min = self.graph_x_min_spin.value()
         settings.x_max = self.graph_x_max_spin.value()
         settings.y_min = self.graph_y_min_spin.value()
@@ -2109,9 +2538,12 @@ class MainWindow(QMainWindow):
         settings.y_log = self.graph_y_log_check.isChecked()
         settings.image_width = self.graph_width_spin.value()
         settings.image_height = self.graph_height_spin.value()
-        settings.dpi = self.graph_dpi_spin.value()
+        settings.dpi = QUALITY_DPI_OPTIONS.get(self.graph_quality_combo.currentText(), QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
         settings.transparent = self.graph_transparent_check.isChecked()
         self.update_axis_spin_enabled()
+        kind = self._current_graph_kind()
+        if kind is not None:
+            self._apply_axis_settings_for_kind(plot, kind)
         plot.redraw()
 
     def update_axis_spin_enabled(self) -> None:
@@ -2119,7 +2551,7 @@ class MainWindow(QMainWindow):
         plot_kind = plot._last_plot[0] if plot is not None and plot._last_plot is not None else "xy"
         has_plot = plot is not None
         x_axis_available = has_plot and plot_kind in ("xy", "series")
-        manual_axis = has_plot and not self.graph_axis_auto_check.isChecked()
+        manual_axis = has_plot and self.graph_axis_mode_combo.currentText() == "手動固定"
         self.graph_x_min_spin.setEnabled(manual_axis and x_axis_available)
         self.graph_x_max_spin.setEnabled(manual_axis and x_axis_available)
         self.graph_y_min_spin.setEnabled(manual_axis)
@@ -2146,6 +2578,7 @@ class MainWindow(QMainWindow):
     def on_case_finished(self, result: CaseResult) -> None:
         self.results.append(result)
         self.add_result_row(result)
+        self.update_common_axis_ranges()
         self.update_evap_plot()
         if len(self.results) == 1:
             self.table.selectRow(0)
@@ -2159,7 +2592,14 @@ class MainWindow(QMainWindow):
         self.log("解析が完了しました。")
 
     def _theory_comparison(self, result: CaseResult) -> TheoryComparison:
-        return build_theory_comparison(result, self.theory_settings(), DEFAULT_ALPHA_VALUES)
+        key = (id(result), self.theory_settings())
+        comparison = self._theory_comparison_cache.get(key)
+        if comparison is None:
+            if len(self._theory_comparison_cache) > 512:
+                self._theory_comparison_cache.clear()
+            comparison = build_theory_comparison(result, key[1], DEFAULT_ALPHA_VALUES)
+            self._theory_comparison_cache[key] = comparison
+        return comparison
 
     def add_result_row(self, result: CaseResult) -> None:
         row = self.table.rowCount()
@@ -2190,53 +2630,37 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def update_selected_case_plots(self) -> None:
-        current_row = self.table.currentRow()
-        if current_row < 0:
-            return
-        item = self.table.item(current_row, 0)
-        if item is None:
-            return
-        result_index = item.data(Qt.UserRole)
-        if result_index is None or result_index >= len(self.results):
-            return
-        result = self.results[result_index]
-        times = [row.time for row in result.rows]
-        volumes = [row.volume for row in result.rows]
-        radii = [row.equivalent_radius for row in result.rows]
-        self.volume_plot.plot_xy(f"{result.case_name}: 体積-時間", "時間 [s]", "体積 [m^3]", times, volumes)
-        self.radius_plot.plot_xy(
-            f"{result.case_name}: 等価半径-時間",
-            "時間 [s]",
-            "等価半径 [m]",
-            times,
-            radii,
-        )
-        angle_points = [
-            (row.time, row.contact_angle_deg)
-            for row in result.rows
-            if row.contact_angle_deg is not None
-        ]
-        radius_points = [
-            (row.time, row.contact_radius)
-            for row in result.rows
-            if row.contact_radius is not None
-        ]
-        self.contact_angle_plot.plot_xy(
-            f"{result.case_name}: 接触角-時間",
-            "時間 [s]",
-            "接触角 [deg]",
-            [point[0] for point in angle_points],
-            [point[1] for point in angle_points],
-        )
-        self.contact_radius_plot.plot_xy(
-            f"{result.case_name}: 接触半径-時間",
-            "時間 [s]",
-            "接触半径 [m]",
-            [point[0] for point in radius_points],
-            [point[1] for point in radius_points],
-        )
-        self.update_theory_plots(result)
-        self.update_visual_controls(result)
+        self.refresh_current_result_tab()
+
+    def refresh_current_result_tab(self) -> None:
+        result = self.current_result()
+        tab = self.tabs.currentWidget()
+        if tab is self.volume_plot:
+            if result is None:
+                self.volume_plot.clear("体積-時間")
+            else:
+                self._plot_standard_result_for_export(self.volume_plot, result, "volume_time")
+        elif tab is self.radius_plot:
+            if result is None:
+                self.radius_plot.clear("等価半径-時間")
+            else:
+                self._plot_standard_result_for_export(self.radius_plot, result, "equivalent_radius_time")
+        elif tab is self.contact_angle_plot:
+            if result is None:
+                self.contact_angle_plot.clear("接触角-時間")
+            else:
+                self._plot_standard_result_for_export(self.contact_angle_plot, result, "contact_angle_time")
+        elif tab is self.contact_radius_plot:
+            if result is None:
+                self.contact_radius_plot.clear("接触半径-時間")
+            else:
+                self._plot_standard_result_for_export(self.contact_radius_plot, result, "contact_radius_time")
+        elif tab is self.evap_plot:
+            self.update_evap_plot()
+        elif tab is self.theory_tab:
+            self.update_theory_plots(result)
+        elif tab is self.visual_tab:
+            self.update_visual_controls(result)
 
     def current_result(self) -> CaseResult | None:
         current_row = self.table.currentRow()
@@ -2251,11 +2675,24 @@ class MainWindow(QMainWindow):
         return self.results[result_index]
 
     @Slot()
+    def schedule_theory_outputs_refresh(self) -> None:
+        self._theory_refresh_timer.start()
+
+    @Slot()
+    def refresh_theory_plot_visibility(self) -> None:
+        self.update_common_axis_ranges()
+        if self.tabs.currentWidget() is self.theory_tab:
+            self.update_theory_plots()
+
+    @Slot()
     def refresh_theory_outputs(self) -> None:
+        self._theory_refresh_timer.stop()
         self.update_theory_control_state()
         self.update_theory_diagnostics()
         self.update_theory_table_columns()
-        self.update_theory_plots()
+        self.update_common_axis_ranges()
+        if self.tabs.currentWidget() is self.theory_tab:
+            self.update_theory_plots()
 
     def update_theory_table_columns(self) -> None:
         if not self.results:
@@ -2302,11 +2739,21 @@ class MainWindow(QMainWindow):
         em_series: list[PlotSeries] = []
         radius_series: list[PlotSeries] = []
         if self.theory_show_md_check.isChecked():
+            em_times, md_evaporated_masses = _clip_xy_to_evaporation(
+                result,
+                comparison.times,
+                comparison.md_evaporated_masses,
+            )
+            radius_times, md_equivalent_radii = _clip_xy_to_evaporation(
+                result,
+                comparison.times,
+                comparison.md_equivalent_radii,
+            )
             em_series.append(
                 PlotSeries(
                     "MD",
-                    comparison.times,
-                    comparison.md_evaporated_masses,
+                    em_times,
+                    md_evaporated_masses,
                     style="scatter",
                     color="#111111",
                     marker="o",
@@ -2315,8 +2762,8 @@ class MainWindow(QMainWindow):
             radius_series.append(
                 PlotSeries(
                     "MD",
-                    comparison.times,
-                    comparison.md_equivalent_radii,
+                    radius_times,
+                    md_equivalent_radii,
                     style="scatter",
                     color="#111111",
                     marker="o",
@@ -2336,11 +2783,13 @@ class MainWindow(QMainWindow):
                 continue
             label = f"alpha_e={alpha:g}"
             color = alpha_colors.get(alpha)
+            em_times, evaporated_masses = _clip_xy_to_evaporation(result, curve.times, curve.evaporated_masses)
+            radius_times, equivalent_radii = _clip_xy_to_evaporation(result, curve.times, curve.equivalent_radii)
             em_series.append(
-                PlotSeries(label, curve.times, curve.evaporated_masses, style="line", color=color)
+                PlotSeries(label, em_times, evaporated_masses, style="line", color=color)
             )
             radius_series.append(
-                PlotSeries(label, curve.times, curve.equivalent_radii, style="line", color=color)
+                PlotSeries(label, radius_times, equivalent_radii, style="line", color=color)
             )
 
         if self.theory_show_fit_check.isChecked() and comparison.fit_curve is not None:
@@ -2349,11 +2798,21 @@ class MainWindow(QMainWindow):
                 fit_label = f"fit alpha_e={comparison.fit.alpha_e:.4g}"
                 if comparison.fit.boundary:
                     fit_label += f" ({comparison.fit.boundary})"
+            em_times, evaporated_masses = _clip_xy_to_evaporation(
+                result,
+                comparison.fit_curve.times,
+                comparison.fit_curve.evaporated_masses,
+            )
+            radius_times, equivalent_radii = _clip_xy_to_evaporation(
+                result,
+                comparison.fit_curve.times,
+                comparison.fit_curve.equivalent_radii,
+            )
             em_series.append(
                 PlotSeries(
                     fit_label,
-                    comparison.fit_curve.times,
-                    comparison.fit_curve.evaporated_masses,
+                    em_times,
+                    evaporated_masses,
                     style="line",
                     color="#d62728",
                     linestyle="--",
@@ -2363,8 +2822,8 @@ class MainWindow(QMainWindow):
             radius_series.append(
                 PlotSeries(
                     fit_label,
-                    comparison.fit_curve.times,
-                    comparison.fit_curve.equivalent_radii,
+                    radius_times,
+                    equivalent_radii,
                     style="line",
                     color="#d62728",
                     linestyle="--",
@@ -2372,6 +2831,8 @@ class MainWindow(QMainWindow):
                 )
             )
 
+        self._apply_axis_settings_for_kind(self.theory_em_plot, "theory_evaporated_mass")
+        self._apply_axis_settings_for_kind(self.theory_radius_plot, "theory_equivalent_radius")
         self.theory_em_plot.plot_series(
             f"{result.case_name}: 蒸発量 EM-時間",
             "時間 [s]",
@@ -2553,17 +3014,297 @@ class MainWindow(QMainWindow):
             start, end = end, start
         return start, end
 
+    def _current_graph_kind(self) -> str | None:
+        tab = self.tabs.currentWidget()
+        if tab is self.volume_plot:
+            return "volume_time"
+        if tab is self.radius_plot:
+            return "equivalent_radius_time"
+        if tab is self.contact_angle_plot:
+            return "contact_angle_time"
+        if tab is self.contact_radius_plot:
+            return "contact_radius_time"
+        if tab is self.evap_plot:
+            return "evaporation_time_all_cases"
+        if tab is self.theory_tab:
+            target = self.graph_axis_target_combo.currentData() if hasattr(self, "graph_axis_target_combo") else ""
+            return "theory_equivalent_radius" if target == "theory_equivalent_radius" else "theory_evaporated_mass"
+        return None
+
+    def update_common_axis_ranges(self) -> None:
+        ranges: dict[str, tuple[float, float, float, float]] = {}
+        for kind in (
+            "volume_time",
+            "equivalent_radius_time",
+            "contact_angle_time",
+            "contact_radius_time",
+            "evaporation_time_all_cases",
+            "theory_evaporated_mass",
+            "theory_equivalent_radius",
+        ):
+            axis_range = self._auto_axis_range_for_kind(kind)
+            if axis_range is not None:
+                ranges[kind] = axis_range
+        self._auto_axis_ranges = ranges
+
+    def _auto_axis_range_for_kind(self, kind: str) -> tuple[float, float, float, float] | None:
+        x_values: list[float] = []
+        y_values: list[float] = []
+        if kind in ("volume_time", "equivalent_radius_time", "contact_angle_time", "contact_radius_time"):
+            for result in self.results:
+                rows = _rows_until_evaporation(result)
+                for row in rows:
+                    if kind == "volume_time":
+                        x_values.append(row.time)
+                        y_values.append(row.volume)
+                    elif kind == "equivalent_radius_time":
+                        x_values.append(row.time)
+                        y_values.append(row.equivalent_radius)
+                    elif kind == "contact_angle_time" and row.contact_angle_deg is not None:
+                        x_values.append(row.time)
+                        y_values.append(row.contact_angle_deg)
+                    elif kind == "contact_radius_time" and row.contact_radius is not None:
+                        x_values.append(row.time)
+                        y_values.append(row.contact_radius)
+        elif kind == "evaporation_time_all_cases":
+            y_values = [result.evaporation_time for result in self.results if result.evaporation_time is not None]
+            x_values = list(range(len(y_values)))
+        elif kind in ("theory_evaporated_mass", "theory_equivalent_radius"):
+            value_kind = "em" if kind == "theory_evaporated_mass" else "radius"
+            for result in self.results:
+                comparison = self._theory_comparison(result)
+                if comparison.status != "ok":
+                    continue
+                for series in self._theory_export_series(result, comparison, value_kind):
+                    x_values.extend(series.x)
+                    y_values.extend(series.y)
+        return _padded_axis_range(x_values, y_values)
+
+    def _apply_axis_settings_for_kind(self, plot: PlotWidget, kind: str) -> None:
+        if plot.settings.axis_mode == "auto_fixed":
+            axis_range = self._auto_axis_ranges.get(kind)
+            if axis_range is not None:
+                plot.settings.x_min, plot.settings.x_max, plot.settings.y_min, plot.settings.y_max = axis_range
+            plot.settings.axis_auto = False
+        elif plot.settings.axis_mode == "manual_fixed":
+            plot.settings.axis_auto = False
+
+    def _current_png_context(self) -> tuple[str, PlotWidget] | None:
+        tab = self.tabs.currentWidget()
+        if tab is self.volume_plot:
+            return "volume_time", self.volume_plot
+        if tab is self.radius_plot:
+            return "equivalent_radius_time", self.radius_plot
+        if tab is self.contact_angle_plot:
+            return "contact_angle_time", self.contact_angle_plot
+        if tab is self.contact_radius_plot:
+            return "contact_radius_time", self.contact_radius_plot
+        if tab is self.evap_plot:
+            return "evaporation_time_all_cases", self.evap_plot
+        return None
+
+    def _theory_png_options(self, result: CaseResult | None = None) -> list[tuple[str, PlotWidget | list[PlotWidget], str]]:
+        return [
+            ("蒸発量 EM", self.theory_em_plot, self._suggested_png_filename("theory_evaporated_mass", result)),
+            ("理論/MD 等価半径", self.theory_radius_plot, self._suggested_png_filename("theory_equivalent_radius", result)),
+            ("上下2枚", [self.theory_em_plot, self.theory_radius_plot], self._suggested_png_filename("theory_combined", result)),
+        ]
+
+    def _suggested_png_filename(self, kind: str, result: CaseResult | None) -> str:
+        if kind == "evaporation_time_all_cases":
+            return "evaporation_time_all_cases.png"
+        case_name = _safe_filename(result.case_name) if result is not None else "selected_case"
+        suffixes = {
+            "volume_time": "volume_time",
+            "equivalent_radius_time": "equivalent_radius_time",
+            "contact_angle_time": "contact_angle_time",
+            "contact_radius_time": "contact_radius_time",
+            "theory": "theory",
+            "theory_evaporated_mass": "theory_evaporated_mass",
+            "theory_equivalent_radius": "theory_equivalent_radius",
+            "theory_combined": "theory_combined",
+        }
+        return f"{case_name}_{suffixes.get(kind, 'graph')}.png"
+
+    def _choose_output_directory(self, title: str, suggested_name: str) -> Path | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
+        row = QHBoxLayout()
+        path_edit = QLineEdit(str(Path(self._local_dialog_start_dir()) / suggested_name))
+        browse_button = QPushButton("参照")
+        row.addWidget(path_edit, 1)
+        row.addWidget(browse_button)
+        layout.addWidget(QLabel("保存先フォルダ"))
+        layout.addLayout(row)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("OK")
+        buttons.button(QDialogButtonBox.Cancel).setText("キャンセル")
+        layout.addWidget(buttons)
+
+        def browse() -> None:
+            directory = QFileDialog.getExistingDirectory(dialog, "親フォルダを選択", self._local_dialog_start_dir())
+            if directory:
+                path_edit.setText(str(Path(directory) / suggested_name))
+
+        browse_button.clicked.connect(browse)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        text = path_edit.text().strip()
+        if not text:
+            return None
+        return Path(text)
+
+    def _selected_theory_bulk_kind(self) -> str | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("保存する理論グラフ")
+        layout = QVBoxLayout(dialog)
+        combo = QComboBox()
+        combo.addItem("蒸発量 EM", "theory_evaporated_mass")
+        combo.addItem("理論/MD 等価半径", "theory_equivalent_radius")
+        combo.addItem("上下2枚", "theory_combined")
+        layout.addWidget(QLabel("全ケースPNG出力するグラフを選択してください。"))
+        layout.addWidget(combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("OK")
+        buttons.button(QDialogButtonBox.Cancel).setText("キャンセル")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return str(combo.currentData())
+
+    def _plot_for_export(self, kind: str, result: CaseResult | None, base_plot: PlotWidget) -> PlotWidget | CombinedPlotWidget:
+        plot = PlotWidget()
+        plot.settings = GraphSettings(**vars(base_plot.settings))
+        if kind == "evaporation_time_all_cases":
+            labels = [item.case_name for item in self.results if item.evaporation_time is not None]
+            values = [item.evaporation_time for item in self.results if item.evaporation_time is not None]
+            self._apply_axis_settings_for_kind(plot, kind)
+            if labels:
+                plot.plot_bar("蒸発完了時刻", labels, values)
+            else:
+                plot.clear("蒸発完了時刻")
+            return plot
+        if result is None:
+            plot.clear("ケースが選択されていません")
+            return plot
+        if kind in ("volume_time", "equivalent_radius_time", "contact_angle_time", "contact_radius_time"):
+            self._plot_standard_result_for_export(plot, result, kind)
+        elif kind == "theory_combined":
+            return self._plot_combined_theory_result_for_export(result, base_plot)
+        elif kind in ("theory_evaporated_mass", "theory_equivalent_radius"):
+            self._plot_theory_result_for_export(plot, result, kind)
+        else:
+            plot.clear("保存対象外のグラフです")
+        return plot
+
+    def _plot_combined_theory_result_for_export(self, result: CaseResult, base_plot: PlotWidget) -> CombinedPlotWidget:
+        em_plot = PlotWidget()
+        radius_plot = PlotWidget()
+        em_plot.settings = GraphSettings(**vars(self.theory_em_plot.settings))
+        radius_plot.settings = GraphSettings(**vars(self.theory_radius_plot.settings))
+        self._plot_theory_result_for_export(em_plot, result, "theory_evaporated_mass")
+        self._plot_theory_result_for_export(radius_plot, result, "theory_equivalent_radius")
+        combined = CombinedPlotWidget([em_plot, radius_plot], owns_source_plots=True)
+        combined.settings = GraphSettings(**vars(base_plot.settings))
+        combined.settings.image_height = min(30.0, max(combined.settings.image_height, combined.settings.image_height * 2.0))
+        combined.redraw()
+        return combined
+
+    def _plot_standard_result_for_export(self, plot: PlotWidget, result: CaseResult, kind: str) -> None:
+        rows = _rows_until_evaporation(result)
+        times = [row.time for row in rows]
+        self._apply_axis_settings_for_kind(plot, kind)
+        if kind == "volume_time":
+            plot.plot_xy(f"{result.case_name}: 体積-時間", "時間 [s]", "体積 [m^3]", times, [row.volume for row in rows])
+        elif kind == "equivalent_radius_time":
+            plot.plot_xy(
+                f"{result.case_name}: 等価半径-時間",
+                "時間 [s]",
+                "等価半径 [m]",
+                times,
+                [row.equivalent_radius for row in rows],
+            )
+        elif kind == "contact_angle_time":
+            points = [(row.time, row.contact_angle_deg) for row in rows if row.contact_angle_deg is not None]
+            plot.plot_xy(
+                f"{result.case_name}: 接触角-時間",
+                "時間 [s]",
+                "接触角 [deg]",
+                [point[0] for point in points],
+                [point[1] for point in points],
+            )
+        elif kind == "contact_radius_time":
+            points = [(row.time, row.contact_radius) for row in rows if row.contact_radius is not None]
+            plot.plot_xy(
+                f"{result.case_name}: 接触半径-時間",
+                "時間 [s]",
+                "接触半径 [m]",
+                [point[0] for point in points],
+                [point[1] for point in points],
+            )
+
+    def _plot_theory_result_for_export(self, plot: PlotWidget, result: CaseResult, kind: str) -> None:
+        comparison = self._theory_comparison(result)
+        self._apply_axis_settings_for_kind(plot, kind)
+        if comparison.status != "ok":
+            plot.clear(f"{result.case_name}: {comparison.status}")
+            return
+        series = self._theory_export_series(result, comparison, "em" if kind == "theory_evaporated_mass" else "radius")
+        if kind == "theory_evaporated_mass":
+            plot.plot_series(f"{result.case_name}: 蒸発量 EM-時間", "時間 [s]", "蒸発量 EM [kg]", series)
+        else:
+            plot.plot_series(f"{result.case_name}: 理論/MD 等価半径-時間", "時間 [s]", "等価半径 [m]", series)
+
+    def _theory_export_series(self, result: CaseResult, comparison: TheoryComparison, value_kind: str) -> list[PlotSeries]:
+        series_list: list[PlotSeries] = []
+        if self.theory_show_md_check.isChecked():
+            values = comparison.md_evaporated_masses if value_kind == "em" else comparison.md_equivalent_radii
+            x_values, y_values = _clip_xy_to_evaporation(result, comparison.times, values)
+            series_list.append(PlotSeries("MD", x_values, y_values, style="scatter", color="#111111", marker="o"))
+        alpha_colors = {0.8: "#1f77b4", 0.9: "#ff7f0e", 1.0: "#2ca02c"}
+        for alpha, checkbox in self.theory_alpha_checks.items():
+            if not checkbox.isChecked():
+                continue
+            curve = comparison.curves.get(alpha)
+            if curve is None:
+                continue
+            values = curve.evaporated_masses if value_kind == "em" else curve.equivalent_radii
+            x_values, y_values = _clip_xy_to_evaporation(result, curve.times, values)
+            series_list.append(PlotSeries(f"alpha_e={alpha:g}", x_values, y_values, style="line", color=alpha_colors.get(alpha)))
+        if self.theory_show_fit_check.isChecked() and comparison.fit_curve is not None:
+            label = "fit"
+            if comparison.fit.alpha_e is not None:
+                label = f"fit alpha_e={comparison.fit.alpha_e:.4g}"
+                if comparison.fit.boundary:
+                    label += f" ({comparison.fit.boundary})"
+            values = comparison.fit_curve.evaporated_masses if value_kind == "em" else comparison.fit_curve.equivalent_radii
+            x_values, y_values = _clip_xy_to_evaporation(result, comparison.fit_curve.times, values)
+            series_list.append(PlotSeries(label, x_values, y_values, style="line", color="#d62728", linestyle="--", linewidth=1.8))
+        return series_list
+
     @Slot()
     def export_visual_png(self) -> None:
         result = self.current_result()
         if result is None:
             QMessageBox.information(self, "ケースなし", "可視化する結果ケースを選択してください。")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "可視化PNGを保存", self._local_dialog_start_dir(), "PNG (*.png)")
+        filename = f"{_safe_filename(result.case_name)}_visualization.png"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "可視化PNGを保存",
+            str(Path(self._local_dialog_start_dir()) / filename),
+            "PNG (*.png)",
+        )
         if not path:
             return
-        self.visual_plot.save_png(Path(path))
-        self.log(f"可視化PNGを保存しました: {path}")
+        output_path = _ensure_suffix(Path(path), ".png")
+        self.visual_plot.save_png(output_path)
+        self.log(f"可視化PNGを保存しました: {output_path}")
 
     @Slot()
     def export_visual_gif(self) -> None:
@@ -2571,21 +3312,28 @@ class MainWindow(QMainWindow):
         if result is None or not result.rows:
             QMessageBox.information(self, "ケースなし", "可視化する結果ケースを選択してください。")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "可視化GIFを保存", self._local_dialog_start_dir(), "GIF (*.gif)")
+        filename = f"{_safe_filename(result.case_name)}_visualization.gif"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "可視化GIFを保存",
+            str(Path(self._local_dialog_start_dir()) / filename),
+            "GIF (*.gif)",
+        )
         if not path:
             return
+        output_path = _ensure_suffix(Path(path), ".gif")
         start, end = self._visual_range_indices()
         rows = result.rows[start : end + 1]
         writer = PillowWriter(fps=self.visual_fps_spin.value())
         try:
-            with writer.saving(self.visual_plot.figure, path, dpi=120):
+            with writer.saving(self.visual_plot.figure, str(output_path), dpi=120):
                 for row in rows:
                     frame = self._load_visual_frame(result, row.time)
                     self._draw_visual_frame(frame)
                     self.visual_plot.canvas.draw()
                     writer.grab_frame()
                     QApplication.processEvents()
-            self.log(f"可視化GIFを保存しました: {path}")
+            self.log(f"可視化GIFを保存しました: {output_path}")
         except Exception as exc:
             QMessageBox.warning(self, "GIF保存エラー", str(exc))
             self.log(f"可視化GIF保存に失敗しました: {exc}")
@@ -2593,6 +3341,7 @@ class MainWindow(QMainWindow):
     def update_evap_plot(self) -> None:
         labels = [result.case_name for result in self.results if result.evaporation_time is not None]
         values = [result.evaporation_time for result in self.results if result.evaporation_time is not None]
+        self._apply_axis_settings_for_kind(self.evap_plot, "evaporation_time_all_cases")
         if labels:
             self.evap_plot.plot_bar("蒸発完了時刻", labels, values)
         else:
@@ -2603,10 +3352,10 @@ class MainWindow(QMainWindow):
         if not self.results:
             QMessageBox.information(self, "結果なし", "出力前に解析を実行してください。")
             return
-        directory = QFileDialog.getExistingDirectory(self, "出力フォルダを選択", self._local_dialog_start_dir())
-        if not directory:
+        out_dir = self._choose_output_directory("CSV出力フォルダ", f"mdfoam_csv_{_timestamp()}")
+        if out_dir is None:
             return
-        out_dir = Path(directory)
+        out_dir.mkdir(parents=True, exist_ok=True)
         write_summary_csv(out_dir / "mdfoam_summary.csv", self.results)
         write_timeseries_csv(out_dir / "mdfoam_timeseries.csv", self.results)
         theory_settings = self.theory_settings()
@@ -2617,13 +3366,61 @@ class MainWindow(QMainWindow):
     @Slot()
     def export_png(self) -> None:
         tab = self.tabs.currentWidget()
-        if not isinstance(tab, PlotWidget):
+        if isinstance(tab, PlotWidget):
+            context = self._current_png_context()
+            if context is None:
+                return
+            kind, plot = context
+            filename = self._suggested_png_filename(kind, self.current_result())
+            dialog = GraphPngPreviewDialog(plot, self._local_dialog_start_dir(), self, filename)
+        elif tab is self.theory_tab:
+            result = self.current_result()
+            filename = self._suggested_png_filename("theory_evaporated_mass", result)
+            dialog = GraphPngPreviewDialog(self._theory_png_options(result), self._local_dialog_start_dir(), self, filename)
+        else:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "現在のグラフを保存", self._local_dialog_start_dir(), "PNG (*.png)")
-        if not path:
+        if dialog.exec() == QDialog.Accepted and dialog.saved_path is not None:
+            self.log(f"PNGを出力しました: {dialog.saved_path}")
+
+    @Slot()
+    def export_all_png(self) -> None:
+        if not self.results:
+            QMessageBox.information(self, "結果なし", "出力前に解析を実行してください。")
             return
-        tab.save_png(Path(path))
-        self.log(f"PNGを出力しました: {path}")
+        tab = self.tabs.currentWidget()
+        context = self._current_png_context()
+        if context is not None:
+            kind, base_plot = context
+        elif tab is self.theory_tab:
+            kind = self._selected_theory_bulk_kind()
+            if kind is None:
+                return
+            base_plot = self.theory_radius_plot if kind == "theory_equivalent_radius" else self.theory_em_plot
+        else:
+            QMessageBox.information(self, "対象外", "可視化タブは全ケースPNG出力の対象外です。")
+            return
+        out_dir = self._choose_output_directory("PNG出力フォルダ", f"mdfoam_png_{_timestamp()}")
+        if out_dir is None:
+            return
+        out_dir.mkdir(parents=True, exist_ok=True)
+        saved_count = 0
+        try:
+            if kind == "evaporation_time_all_cases":
+                plot = self._plot_for_export(kind, None, base_plot)
+                plot.save_png(out_dir / "evaporation_time_all_cases.png")
+                plot.close()
+                saved_count = 1
+            else:
+                for result in self.results:
+                    plot = self._plot_for_export(kind, result, base_plot)
+                    plot.save_png(out_dir / self._suggested_png_filename(kind, result))
+                    plot.close()
+                    saved_count += 1
+        except Exception as exc:
+            QMessageBox.warning(self, "PNG出力エラー", str(exc))
+            self.log(f"全ケースPNG出力に失敗しました: {exc}")
+            return
+        self.log(f"全ケースPNGを出力しました: {out_dir} ({saved_count}枚)")
 
     @Slot(str)
     def log(self, message: str) -> None:
@@ -2637,6 +3434,138 @@ class MainWindow(QMainWindow):
 
 def _fmt(value: float) -> str:
     return f"{value:.8g}"
+
+
+def _padded_axis_range(
+    x_values: list[float],
+    y_values: list[float],
+) -> tuple[float, float, float, float] | None:
+    x_range = _padded_value_range(x_values)
+    y_range = _padded_value_range(y_values)
+    if x_range is None or y_range is None:
+        return None
+    return x_range[0], x_range[1], y_range[0], y_range[1]
+
+
+def _padded_value_range(values: list[float]) -> tuple[float, float] | None:
+    finite_values = [float(value) for value in values if np.isfinite(value)]
+    if not finite_values:
+        return None
+    minimum = min(finite_values)
+    maximum = max(finite_values)
+    if minimum == maximum:
+        padding = max(abs(minimum) * 0.05, 1.0e-12)
+    else:
+        padding = (maximum - minimum) * 0.05
+    lower = minimum - padding
+    upper = maximum + padding
+    if minimum >= 0.0 and lower < 0.0:
+        lower = 0.0
+    if lower == upper:
+        upper = lower + max(abs(lower) * 0.1, 1.0e-12)
+    return lower, upper
+
+
+def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
+    if plot._last_plot is None:
+        axis.set_axis_off()
+        return
+    kind, title, x_label, y_label, x, y = plot._last_plot
+    original_settings = plot.settings
+    plot.settings = settings
+    try:
+        if kind == "xy":
+            axis.scatter(
+                x,
+                y,
+                s=settings.point_size,
+                c=settings.point_color,
+                alpha=settings.point_alpha,
+                marker=settings.marker,
+            )
+            plot._apply_common_style(axis, x_label, y_label, title)
+        elif kind == "bar":
+            axis.bar(x, y, color=settings.point_color, alpha=settings.point_alpha)
+            plot._apply_common_style(axis, "", y_label, title, is_bar=True)
+            axis.tick_params(axis="x", rotation=45 if settings.tick_labels_visible else 0)
+        elif kind == "series" and plot._last_series is not None:
+            title, x_label, y_label, series_list = plot._last_series
+            for item in series_list:
+                if not item.x or not item.y:
+                    continue
+                if item.style == "line":
+                    axis.plot(
+                        item.x,
+                        item.y,
+                        label=item.label,
+                        color=item.color,
+                        linestyle=item.linestyle,
+                        linewidth=item.linewidth,
+                        alpha=settings.point_alpha,
+                    )
+                else:
+                    axis.scatter(
+                        item.x,
+                        item.y,
+                        label=item.label,
+                        s=settings.point_size,
+                        c=item.color or settings.point_color,
+                        alpha=settings.point_alpha,
+                        marker=item.marker or settings.marker,
+                    )
+            if any(item.label for item in series_list):
+                axis.legend(fontsize=max(6, settings.font_size - 1))
+            plot._apply_common_style(axis, x_label, y_label, title)
+        elif kind == "clear":
+            plot._apply_common_style(axis, "", "", title)
+    finally:
+        plot.settings = original_settings
+
+
+def _quality_label_for_dpi(dpi: int) -> str:
+    for label, value in QUALITY_DPI_OPTIONS.items():
+        if value == dpi:
+            return label
+    return DEFAULT_QUALITY_LABEL
+
+
+def _timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _safe_filename(value: str) -> str:
+    sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", value.strip())
+    sanitized = re.sub(r"\s+", "_", sanitized)
+    sanitized = sanitized.strip("._")
+    return sanitized or "case"
+
+
+def _ensure_suffix(path: Path, suffix: str) -> Path:
+    return path if path.suffix.lower() == suffix.lower() else path.with_suffix(suffix)
+
+
+def _rows_until_evaporation(result: CaseResult) -> list[TimeResult]:
+    if result.evaporation_time is None:
+        return list(result.rows)
+    return [row for row in result.rows if row.time <= result.evaporation_time]
+
+
+def _clip_xy_to_evaporation(
+    result: CaseResult,
+    x_values: list[float],
+    y_values: list[float],
+) -> tuple[list[float], list[float]]:
+    if result.evaporation_time is None:
+        return list(x_values), list(y_values)
+    clipped = [
+        (x_value, y_value)
+        for x_value, y_value in zip(x_values, y_values)
+        if x_value <= result.evaporation_time
+    ]
+    if not clipped:
+        return [], []
+    x_clipped, y_clipped = zip(*clipped)
+    return list(x_clipped), list(y_clipped)
 
 
 def _fmt_optional(value: float | None) -> str:
