@@ -7,7 +7,12 @@ import re
 
 import numpy as np
 
-from .analysis import AnalysisSettings, ContactFitDiagnostics, contact_fit_diagnostics
+from .analysis import (
+    AnalysisSettings,
+    ContactFitDiagnostics,
+    contact_fit_diagnostics,
+    density_contour_points,
+)
 from .openfoam import (
     NUMBER_RE,
     OpenFoamParseError,
@@ -79,6 +84,7 @@ def load_visualization_frame(
     mesh_info = read_mesh_volumes(case_dir / "main" / "constant" / "polyMesh")
     density_path = time_dir / settings.density_field
     selected_centers: list[tuple[float, float, float]] = []
+    contact_points: list[tuple[float, float, float]] | None = None
     if density_path.is_file() and mesh_info.cell_centers is not None:
         densities = _expanded_densities(
             read_scalar_internal_field(density_path),
@@ -89,8 +95,13 @@ def load_visualization_frame(
             for density, center in zip(densities, mesh_info.cell_centers)
             if density >= settings.density_threshold
         ]
+        contact_points = density_contour_points(
+            densities,
+            mesh_info,
+            settings.density_threshold,
+        )
 
-    contact = contact_fit_diagnostics(selected_centers, mesh_info.point_bounds, settings)
+    contact = contact_fit_diagnostics(contact_points, mesh_info.point_bounds, settings)
     return VisualizationFrame(
         time=time_value,
         time_name=time_dir.name,

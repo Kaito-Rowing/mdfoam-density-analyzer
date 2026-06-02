@@ -268,6 +268,7 @@ class AnalyzerWorker(QObject):
                         case_dir=Path(),
                         status="error",
                         error=str(exc),
+                        contact_average_percent=self.settings.contact_average_percent,
                     )
                 self.case_finished.emit(result)
                 self.progress.emit(index, total)
@@ -1003,6 +1004,12 @@ class MainWindow(QMainWindow):
         self.dz_spin = self._scientific_spin(0.0)
         self.contact_fit_lower_spin = self._fraction_spin(0.5)
         self.contact_fit_upper_spin = self._fraction_spin(1.0)
+        self.contact_average_percent_spin = QDoubleSpinBox()
+        self.contact_average_percent_spin.setDecimals(1)
+        self.contact_average_percent_spin.setRange(1.0, 100.0)
+        self.contact_average_percent_spin.setSingleStep(5.0)
+        self.contact_average_percent_spin.setSuffix(" %")
+        self.contact_average_percent_spin.setValue(100.0)
         self.contact_unwrap_check = QCheckBox("有効")
         self.contact_unwrap_check.setChecked(True)
         advanced_layout.addRow("セル体積 fallback", self.cell_volume_spin)
@@ -1011,6 +1018,7 @@ class MainWindow(QMainWindow):
         advanced_layout.addRow("dz fallback", self.dz_spin)
         advanced_layout.addRow("接触角fit下限", self.contact_fit_lower_spin)
         advanced_layout.addRow("接触角fit上限", self.contact_fit_upper_spin)
+        advanced_layout.addRow("平均接触角の対象範囲", self.contact_average_percent_spin)
         advanced_layout.addRow("xy周期補正", self.contact_unwrap_check)
         settings_content_layout.addWidget(advanced_group)
         settings_content_layout.addStretch(1)
@@ -1124,7 +1132,7 @@ class MainWindow(QMainWindow):
         graph_settings_layout.addLayout(graph_row3)
         results_layout.addWidget(graph_settings_group)
 
-        self.table = ResultsTable(0, 11)
+        self.table = ResultsTable(0, 12)
         self.table.setHorizontalHeaderLabels(
             [
                 "ケース",
@@ -1134,6 +1142,7 @@ class MainWindow(QMainWindow):
                 "蒸発完了時刻",
                 "初期接触角",
                 "最終有効接触角",
+                "平均接触角",
                 "初期接触半径",
                 "最終有効接触半径",
                 "状態",
@@ -1656,6 +1665,7 @@ class MainWindow(QMainWindow):
             contact_fit_lower=self.contact_fit_lower_spin.value(),
             contact_fit_upper=self.contact_fit_upper_spin.value(),
             contact_unwrap_xy=self.contact_unwrap_check.isChecked(),
+            contact_average_percent=self.contact_average_percent_spin.value(),
         )
 
     def _local_dialog_start_dir(self) -> str:
@@ -1881,6 +1891,7 @@ class MainWindow(QMainWindow):
             "" if result.evaporation_time is None else _fmt(result.evaporation_time),
             _fmt_optional(result.initial_contact_angle_deg),
             _fmt_optional(result.final_valid_contact_angle_deg),
+            _fmt_optional(result.average_contact_angle_deg),
             _fmt_optional(result.initial_contact_radius),
             _fmt_optional(result.final_valid_contact_radius),
             _status_label(result.status),

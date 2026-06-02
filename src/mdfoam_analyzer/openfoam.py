@@ -43,6 +43,7 @@ class MeshVolumeInfo:
         tuple[float, float],
         tuple[float, float],
     ] | None = None
+    neighbour_pairs: list[tuple[int, int]] | None = None
 
 
 def strip_comments(text: str) -> str:
@@ -187,6 +188,7 @@ def read_mesh_volumes(poly_mesh_dir: Path) -> MeshVolumeInfo:
         total_volume=sum(abs_volumes),
         cell_centers=cell_centers,
         point_bounds=point_bounds,
+        neighbour_pairs=[(owner[index], neighbour[index]) for index in range(len(neighbour))],
     )
 
 

@@ -32,6 +32,7 @@ class AnalysisSettings:
     contact_fit_lower: float = 0.5
     contact_fit_upper: float = 1.0
     contact_unwrap_xy: bool = True
+    contact_average_percent: float = 100.0
 
     def fallback_cell_volume(self) -> float | None:
         if self.manual_cell_volume and self.manual_cell_volume > 0:
@@ -78,6 +79,7 @@ class CaseResult:
     mesh_source: str = ""
     volume_mode: str = ""
     field_class: str = ""
+    contact_average_percent: float = 100.0
 
     @property
     def time_count(self) -> int:
@@ -101,6 +103,21 @@ class CaseResult:
             if row.contact_angle_deg is not None:
                 return row.contact_angle_deg
         return None
+
+    @property
+    def average_contact_angle_deg(self) -> float | None:
+        if not self.rows:
+            return None
+        percent = max(0.0, min(100.0, self.contact_average_percent))
+        limit = max(1, math.ceil(len(self.rows) * percent / 100.0))
+        values = [
+            row.contact_angle_deg
+            for row in self.rows[:limit]
+            if row.contact_angle_deg is not None
+        ]
+        if not values:
+            return None
+        return sum(values) / len(values)
 
     @property
     def initial_contact_radius(self) -> float | None:
@@ -142,7 +159,12 @@ def analyze_case(
     stop_requested=lambda: False,
     log=lambda message: None,
 ) -> CaseResult:
-    result = CaseResult(case_name=case_dir.name, case_dir=case_dir, status="running")
+    result = CaseResult(
+        case_name=case_dir.name,
+        case_dir=case_dir,
+        status="running",
+        contact_average_percent=settings.contact_average_percent,
+    )
     main_dir = case_dir / "main"
     if not main_dir.is_dir():
         result.status = "error"
@@ -213,10 +235,8 @@ def _analyze_reconstructed(
             _volume_for_time(
                 time_value,
                 densities,
-                mesh_info.volumes,
+                mesh_info,
                 settings,
-                mesh_info.cell_centers,
-                mesh_info.point_bounds,
             )
         )
     log(f"{main_dir.parent.name}: 再構成済み時刻フィールド={len(rows)}")
@@ -266,7 +286,7 @@ def _analyze_processors(
         volume = 0.0
         selected = 0
         total = 0
-        selected_centers: list[tuple[float, float, float]] = []
+        contact_points: list[tuple[float, float, float]] = []
         point_bounds = _combined_point_bounds(
             mesh_info.point_bounds for _, _, mesh_info in proc_data
         )
@@ -284,10 +304,15 @@ def _analyze_processors(
             volume += stats.volume
             selected += stats.selected_count
             total += stats.total_count
-            if stats.selected_centers:
-                selected_centers.extend(stats.selected_centers)
+            contour_points = density_contour_points(
+                densities,
+                mesh_info,
+                settings.density_threshold,
+            )
+            if contour_points:
+                contact_points.extend(contour_points)
         contact_angle, contact_radius, fit_count = _contact_metrics(
-            selected_centers,
+            contact_points,
             point_bounds,
             settings,
         )
@@ -357,19 +382,19 @@ class _SelectedVolumeStats:
 def _volume_for_time(
     time_value: float,
     densities: list[float],
-    cell_volumes: list[float],
+    mesh_info: MeshVolumeInfo,
     settings: AnalysisSettings,
-    cell_centers: list[tuple[float, float, float]] | None = None,
-    point_bounds: tuple[
-        tuple[float, float],
-        tuple[float, float],
-        tuple[float, float],
-    ] | None = None,
 ) -> TimeResult:
-    stats = _selected_volume_stats(densities, cell_volumes, settings, cell_centers)
+    stats = _selected_volume_stats(
+        densities,
+        mesh_info.volumes,
+        settings,
+        mesh_info.cell_centers,
+    )
+    contact_points = density_contour_points(densities, mesh_info, settings.density_threshold)
     contact_angle, contact_radius, fit_count = _contact_metrics(
-        stats.selected_centers,
-        point_bounds,
+        contact_points,
+        mesh_info.point_bounds,
         settings,
     )
     return TimeResult(
@@ -422,6 +447,41 @@ def _expanded_densities(densities: list[float], cell_count: int) -> list[float]:
             f"Density count {len(densities)} does not match cell volume count {cell_count}"
         )
     return densities
+
+
+def density_contour_points(
+    densities: list[float],
+    mesh_info: MeshVolumeInfo,
+    threshold: float,
+) -> list[tuple[float, float, float]] | None:
+    if mesh_info.cell_centers is None or mesh_info.neighbour_pairs is None:
+        return None
+
+    densities = _expanded_densities(densities, len(mesh_info.volumes))
+    centers = np.asarray(mesh_info.cell_centers, dtype=float)
+    contour_points: list[tuple[float, float, float]] = []
+    for owner_cell, neighbour_cell in mesh_info.neighbour_pairs:
+        owner_value = densities[owner_cell]
+        neighbour_value = densities[neighbour_cell]
+        delta_owner = owner_value - threshold
+        delta_neighbour = neighbour_value - threshold
+        if delta_owner == 0.0 and delta_neighbour == 0.0:
+            continue
+        if delta_owner * delta_neighbour > 0.0:
+            continue
+
+        denominator = neighbour_value - owner_value
+        if denominator == 0.0:
+            continue
+        fraction = (threshold - owner_value) / denominator
+        if fraction < -1.0e-12 or fraction > 1.0 + 1.0e-12:
+            continue
+        fraction = max(0.0, min(1.0, fraction))
+        point = centers[owner_cell] + fraction * (
+            centers[neighbour_cell] - centers[owner_cell]
+        )
+        contour_points.append((float(point[0]), float(point[1]), float(point[2])))
+    return contour_points
 
 
 def _combined_point_bounds(
@@ -635,6 +695,8 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                 "evaporation_time",
                 "initial_contact_angle_deg",
                 "final_valid_contact_angle_deg",
+                "average_contact_angle_deg",
+                "contact_average_percent",
                 "initial_contact_radius",
                 "final_valid_contact_radius",
                 "mesh_source",
@@ -654,6 +716,8 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                     "" if result.evaporation_time is None else result.evaporation_time,
                     _csv_optional(result.initial_contact_angle_deg),
                     _csv_optional(result.final_valid_contact_angle_deg),
+                    _csv_optional(result.average_contact_angle_deg),
+                    result.contact_average_percent,
                     _csv_optional(result.initial_contact_radius),
                     _csv_optional(result.final_valid_contact_radius),
                     result.mesh_source,
