@@ -19,5 +19,5 @@ This project follows a lightweight changelog format. Version numbers are intende
 
 ### Notes
 
-- No release artifact has been published yet.
+- This release is source-first and does not include packaged desktop binaries.
 - Large real mdFOAM/OpenFOAM case data is intentionally excluded from the repository.

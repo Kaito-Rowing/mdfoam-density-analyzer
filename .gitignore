@@ -11,6 +11,8 @@ initial/
 initial_a/
 main/
 processor*/
+run*_x*/
+case[0-9]*/
 AllDisMpi_*
 batch_case.out
 batch_status.txt
