@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use mdFOAM Density Analyzer in research, please cite it using this metadata."
+type: software
+title: "mdFOAM Density Analyzer"
+authors:
+  - family-names: "Nakatani"
+    given-names: "Kaito"
+abstract: "A Python desktop application for reproducible batch post-processing of mdFOAM/OpenFOAM-style molecular simulations of nanoscale water droplet evaporation."
+keywords:
+  - mdFOAM
+  - OpenFOAM
+  - molecular simulation
+  - droplet evaporation
+  - contact angle
+  - scientific software
+license: MIT
+repository-code: "https://github.com/Kaito-Rowing/mdfoam-density-analyzer"
+url: "https://github.com/Kaito-Rowing/mdfoam-density-analyzer"
+version: "0.1.1"
+date-released: "2026-06-04"

@@ -31,6 +31,17 @@ This desktop application reads mdFOAM/OpenFOAM-style simulation results directly
 | Desktop workflow | Provides a PySide6 GUI with tables, plots, visualization diagnostics, and CSV/PNG/GIF export. |
 | Remote access | Supports SSH/SFTP case discovery and file download without running remote commands. |
 
+## How to Cite
+
+If you use mdFOAM Density Analyzer in research, please cite the software using the metadata in [CITATION.cff](CITATION.cff).
+
+DOI: pending Zenodo archive for the next GitHub release.
+
+```text
+Kaito Nakatani. mdFOAM Density Analyzer. Version 0.1.1. 2026.
+https://github.com/Kaito-Rowing/mdfoam-density-analyzer
+```
+
 ## Why This Exists
 
 mdFOAM users often need quantitative post-processing that can be repeated across many related simulation cases. Manual visualization workflows are useful for inspection, but they can be difficult to reproduce exactly when the goal is to compare droplet volume, radius, contact angle, contact radius, and evaporation time across tens or roughly 100 cases.

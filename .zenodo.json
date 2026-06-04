@@ -1,0 +1,27 @@
+{
+  "title": "mdFOAM Density Analyzer",
+  "upload_type": "software",
+  "description": "A Python desktop application for reproducible batch post-processing of mdFOAM/OpenFOAM-style molecular simulations of nanoscale water droplet evaporation.",
+  "creators": [
+    {
+      "name": "Nakatani, Kaito"
+    }
+  ],
+  "license": "MIT",
+  "access_right": "open",
+  "keywords": [
+    "mdFOAM",
+    "OpenFOAM",
+    "molecular simulation",
+    "droplet evaporation",
+    "contact angle",
+    "scientific software"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Kaito-Rowing/mdfoam-density-analyzer",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
