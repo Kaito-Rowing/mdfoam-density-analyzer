@@ -1,5 +1,7 @@
 # mdFOAM Density Analyzer
 
+[![CI](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml)
+
 mdFOAM/OpenFOAM形式の計算結果をPythonで直接読み取り、密度しきい値以上の液滴領域について体積、等価半径、蒸発完了時刻、接触角、接触半径を確認するデスクトップアプリです。
 
 ParaView と pvpython は使いません。
