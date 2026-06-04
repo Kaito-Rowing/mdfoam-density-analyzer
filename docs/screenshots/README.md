@@ -2,6 +2,10 @@
 
 This directory is reserved for lightweight screenshots used in the README, GitHub repository page, and release notes.
 
+Current screenshots:
+
+- `results-overview.png`: Results tab with graph controls, summary table, and volume-time plot.
+
 Suggested captures:
 
 - input source selection for local and SSH/SFTP workflows;

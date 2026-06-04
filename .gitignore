@@ -23,6 +23,7 @@ log.mapFields
 mdfoam_summary.csv
 mdfoam_timeseries.csv
 *.png
+!docs/screenshots/*.png
 Sesshoku6.py
 AGENTS.md
 

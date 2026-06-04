@@ -69,9 +69,13 @@ In the GUI:
 7. Review the result table, time-series plots, evaporation-time plot, and visualization tab.
 8. Export CSV, PNG, or GIF outputs as needed.
 
-## Screenshots
+## Application Preview
 
-Screenshots for the GitHub project page should be placed under `docs/screenshots/`.
+![Results tab showing a completed droplet analysis with graph controls, summary table, and volume-time plot](docs/screenshots/results-overview.png)
+
+The results view combines export controls, graph styling options, a per-case summary table, and point-plot tabs for volume, equivalent radius, contact angle, contact radius, evaporation time, theory comparison, and visualization diagnostics.
+
+Additional screenshots for the GitHub project page should be placed under `docs/screenshots/`.
 See `docs/screenshots/README.md` for capture guidelines.
 
 ## Expected Input Structure
