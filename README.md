@@ -67,6 +67,11 @@ In the GUI:
 6. Review the result table, time-series plots, evaporation-time plot, and visualization tab.
 7. Export CSV, PNG, or GIF outputs as needed.
 
+## Screenshots
+
+Screenshots for the GitHub project page should be placed under `docs/screenshots/`.
+See `docs/screenshots/README.md` for capture guidelines.
+
 ## Expected Input Structure
 
 For multiple cases, select a parent directory like this:
@@ -210,4 +215,4 @@ Please avoid committing large simulation outputs, generated case directories, or
 
 ## License
 
-No license file is currently included in this repository. Add an explicit open-source license before distributing or accepting external contributions.
+This project is licensed under the MIT License. See `LICENSE`.
