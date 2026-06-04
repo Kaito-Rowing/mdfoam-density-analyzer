@@ -17,8 +17,7 @@
 
 </div>
 
-mdFOAM/OpenFOAM形式の計算結果をPythonで直接読み取り、密度しきい値以上の液滴領域について体積、等価半径、蒸発完了時刻、接触角、接触半径を確認するデスクトップアプリです。
-The analyzer works directly on OpenFOAM ASCII files and does not require ParaView or pvpython.
+This desktop application reads mdFOAM/OpenFOAM-style simulation results directly in Python and helps inspect droplet volume, equivalent radius, evaporation completion time, contact angle, and contact radius for regions above a density threshold. It works directly on OpenFOAM ASCII files and does not require ParaView or pvpython.
 
 | Focus | What the app does |
 | --- | --- |
@@ -27,6 +26,14 @@ The analyzer works directly on OpenFOAM ASCII files and does not require ParaVie
 | Direct parsing | Reads OpenFOAM ASCII density fields and `constant/polyMesh` files in Python. |
 | Desktop workflow | Provides a PySide6 GUI with tables, plots, visualization diagnostics, and CSV/PNG/GIF export. |
 | Remote access | Supports SSH/SFTP case discovery and file download without running remote commands. |
+
+## Research Use Case / Impact
+
+This project is used in graduate-level research on nanoscale water droplet evaporation. In that workflow, a single parameter sweep can produce tens to roughly 100 mdFOAM/OpenFOAM-style cases that need to be compared with the same density threshold, contact-angle settings, and evaporation-time definition.
+
+Manual ParaView-based post-processing is useful for visual inspection, but it becomes difficult to keep fully reproducible when the same contour extraction, droplet-volume calculation, and contact-angle fitting must be repeated across many cases. Small differences in hand-operated visualization steps can change downstream comparisons.
+
+mdFOAM Density Analyzer standardizes that quantitative analysis path for mdFOAM users. It keeps the core post-processing in Python, reads the OpenFOAM ASCII data directly, and produces comparable tables and plots for batch research workflows.
 
 ## Why This Exists
 

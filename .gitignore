@@ -25,7 +25,6 @@ mdfoam_timeseries.csv
 *.png
 !docs/screenshots/*.png
 Sesshoku6.py
-AGENTS.md
 
 # Keep real case data ignored, but allow tiny synthetic test fixtures.
 !tests/fixtures/
