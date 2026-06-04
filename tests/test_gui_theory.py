@@ -14,7 +14,10 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from PySide6.QtWidgets import QApplication
+try:
+    from PySide6.QtWidgets import QApplication
+except ImportError as exc:
+    raise unittest.SkipTest(f"PySide6 GUI runtime is unavailable: {exc}") from exc
 
 from mdfoam_analyzer.analysis import CaseResult, TimeResult
 from mdfoam_analyzer.gui import CombinedPlotWidget, GraphPngPreviewDialog, MainWindow, PlotWidget

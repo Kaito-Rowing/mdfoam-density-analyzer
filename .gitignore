@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .Python
+.pytest_cache/
 .venv/
 venv/
 env/
@@ -22,3 +23,7 @@ mdfoam_timeseries.csv
 *.png
 Sesshoku6.py
 AGENTS.md
+
+# Keep real case data ignored, but allow tiny synthetic test fixtures.
+!tests/fixtures/
+!tests/fixtures/**
