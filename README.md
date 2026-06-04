@@ -17,6 +17,10 @@
 
 </div>
 
+## Research Impact
+
+Built for reproducible post-processing of mdFOAM/OpenFOAM-style molecular simulations of nanoscale water droplet evaporation. It replaces a manual ParaView + script workflow with a repeatable Python GUI/CLI-oriented analysis path for comparing tens to roughly 100 simulation cases.
+
 This desktop application reads mdFOAM/OpenFOAM-style simulation results directly in Python and helps inspect droplet volume, equivalent radius, evaporation completion time, contact angle, and contact radius for regions above a density threshold. It works directly on OpenFOAM ASCII files and does not require ParaView or pvpython.
 
 | Focus | What the app does |
@@ -26,14 +30,6 @@ This desktop application reads mdFOAM/OpenFOAM-style simulation results directly
 | Direct parsing | Reads OpenFOAM ASCII density fields and `constant/polyMesh` files in Python. |
 | Desktop workflow | Provides a PySide6 GUI with tables, plots, visualization diagnostics, and CSV/PNG/GIF export. |
 | Remote access | Supports SSH/SFTP case discovery and file download without running remote commands. |
-
-## Research Use Case / Impact
-
-This project is used in graduate-level research on nanoscale water droplet evaporation. In that workflow, a single parameter sweep can produce tens to roughly 100 mdFOAM/OpenFOAM-style cases that need to be compared with the same density threshold, contact-angle settings, and evaporation-time definition.
-
-Manual ParaView-based post-processing is useful for visual inspection, but it becomes difficult to keep fully reproducible when the same contour extraction, droplet-volume calculation, and contact-angle fitting must be repeated across many cases. Small differences in hand-operated visualization steps can change downstream comparisons.
-
-mdFOAM Density Analyzer standardizes that quantitative analysis path for mdFOAM users. It keeps the core post-processing in Python, reads the OpenFOAM ASCII data directly, and produces comparable tables and plots for batch research workflows.
 
 ## Why This Exists
 
