@@ -32,6 +32,7 @@ The contact angle workflow is designed to approximate a previous process where c
 - Supports SSH/SFTP workflows for remote HPC results without running commands on the remote host.
 - Exports summary CSV, time-series CSV, graph PNG files, visualization PNG files, and visualization GIF files.
 - Provides a PySide6 desktop GUI with case tables, plots, and visualization diagnostics.
+- UI language can be switched between Japanese, English, Chinese, Spanish, and Hindi.
 
 ## Installation
 
@@ -59,13 +60,14 @@ On Windows, this repository also includes a launcher:
 
 In the GUI:
 
-1. Choose a local folder or switch the input source to SSH.
-2. Select a case folder or a parent folder containing multiple cases.
-3. Choose the density field, usually `rhoM_water`.
-4. Set the density threshold and analysis parameters.
-5. Run the analysis.
-6. Review the result table, time-series plots, evaporation-time plot, and visualization tab.
-7. Export CSV, PNG, or GIF outputs as needed.
+1. Choose the UI language if needed. Available languages are Japanese, English, Chinese, Spanish, and Hindi.
+2. Choose a local folder or switch the input source to SSH.
+3. Select a case folder or a parent folder containing multiple cases.
+4. Choose the density field, usually `rhoM_water`.
+5. Set the density threshold and analysis parameters.
+6. Run the analysis.
+7. Review the result table, time-series plots, evaporation-time plot, and visualization tab.
+8. Export CSV, PNG, or GIF outputs as needed.
 
 ## Screenshots
 
@@ -177,7 +179,7 @@ The time-series plots are shown as point plots rather than connected line plots.
 
 ## Limitations
 
-- The GUI labels are currently Japanese.
+- The GUI supports Japanese, English, Chinese, Spanish, and Hindi labels, but log messages and some detailed error text may still appear in Japanese or from the underlying Python exception.
 - The parser targets OpenFOAM ASCII-style files, not binary OpenFOAM fields.
 - Density fields are treated as cell-centered scalar data.
 - Contact angle and contact radius require mesh-derived cell centers.

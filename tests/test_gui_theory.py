@@ -54,6 +54,38 @@ class GuiTheorySettingsTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_ui_language_switches_without_changing_internal_settings(self) -> None:
+        window = MainWindow()
+        try:
+            expected_titles = {
+                "en": "mdFOAM Density Analyzer",
+                "zh": "mdFOAM 密度分析器",
+                "es": "Analizador de densidad mdFOAM",
+                "hi": "mdFOAM घनत्व विश्लेषक",
+            }
+            for language, title in expected_titles.items():
+                window.apply_language(language)
+                self.assertEqual(window.windowTitle(), title)
+                self.assertEqual(window.language_combo.findData(language), window.language_combo.currentIndex())
+                self.assertEqual(window.source_combo.currentData(), "local")
+                self.assertEqual(window.theory_v0_source_combo.currentData(), "max_volume")
+                self.assertEqual(window.theory_theta_source_combo.currentData(), "average")
+                self.assertEqual(window.graph_axis_mode_combo.currentData(), "auto_fixed")
+                self.assertEqual(window.graph_aspect_combo.currentData(), "auto")
+
+            window.apply_language("en")
+            self.assertEqual(window.workflow_tabs.tabText(0), "Input")
+            self.assertEqual(window.export_csv_button.text(), "Export CSV")
+            self.assertEqual(window.table.horizontalHeaderItem(0).text(), "Case")
+            self.assertEqual(window.tabs.tabText(4), "Evaporation time")
+            window.theory_theta_source_combo.setCurrentIndex(window.theory_theta_source_combo.findData("fixed"))
+            self.assertEqual(window.theory_settings().theta_source, "fixed")
+            window.graph_axis_mode_combo.setCurrentIndex(window.graph_axis_mode_combo.findData("manual_fixed"))
+            window.on_graph_settings_changed()
+            self.assertEqual(window.current_plot_widget().settings.axis_mode, "manual_fixed")
+        finally:
+            window.close()
+
     def test_time_plots_are_clipped_at_evaporation_time(self) -> None:
         window = MainWindow()
         try:

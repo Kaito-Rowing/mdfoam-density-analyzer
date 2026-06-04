@@ -107,6 +107,665 @@ from .visualization import (
 rcParams["font.family"] = ["Yu Gothic", "Meiryo", "MS Gothic", "DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
+LANGUAGES: dict[str, str] = {
+    "ja": "日本語",
+    "en": "English",
+    "zh": "中文",
+    "es": "Español",
+    "hi": "हिन्दी",
+}
+
+TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "mdFOAM 密度解析アプリ": "mdFOAM Density Analyzer",
+        "言語": "Language",
+        "入力": "Input",
+        "入力元": "Input source",
+        "ローカル": "Local",
+        "選択中": "Selected",
+        "更新": "Refresh",
+        "ローカルフォルダ": "Local folder",
+        "フォルダを選択": "Select folder",
+        "解析対象ケースを含むフォルダを選択します。": "Select a folder that contains cases to analyze.",
+        "SSH/SFTP接続": "SSH/SFTP connection",
+        "参照": "Browse",
+        "資格情報を保存": "Save credentials",
+        "プロファイル": "Profile",
+        "ホスト": "Host",
+        "ポート": "Port",
+        "ユーザー": "User",
+        "OpenSSH秘密鍵": "OpenSSH private key",
+        "パスフレーズ/パスワード": "Passphrase/password",
+        "リモートパス": "Remote path",
+        "リモートフォルダ": "Remote folder",
+        "接続/更新": "Connect/refresh",
+        "上へ": "Up",
+        "開く": "Open",
+        "このフォルダを選択": "Select this folder",
+        "キャッシュ削除": "Clear cache",
+        "ケース一覧": "Cases",
+        "解析設定": "Analysis settings",
+        "基本設定": "Basic settings",
+        "密度フィールド": "Density field",
+        "密度しきい値": "Density threshold",
+        "0判定許容値": "Zero tolerance",
+        "連続ゼロ数": "Consecutive zeros",
+        "詳細設定": "Advanced settings",
+        "セル体積 fallback": "Cell volume fallback",
+        "接触角fit下限": "Contact angle fit lower",
+        "接触角fit上限": "Contact angle fit upper",
+        "平均接触角の対象範囲": "Average contact angle range",
+        "xy周期補正": "xy periodic correction",
+        "有効": "Enabled",
+        "蒸発係数 / 理論比較": "Evaporation coefficient / theory",
+        "物性値プリセット": "Material preset",
+        "飽和蒸気密度 rho_v [kg/m^3]": "Saturated vapor density rho_v [kg/m^3]",
+        "液体密度 rho_l [kg/m^3]": "Liquid density rho_l [kg/m^3]",
+        "温度 T [K]": "Temperature T [K]",
+        "分子1個の質量 m [kg]": "Mass per molecule m [kg]",
+        "理論初期体積 V0": "Theory initial volume V0",
+        "接触角ソース": "Contact angle source",
+        "固定theta [deg]": "Fixed theta [deg]",
+        "fit対象範囲": "Fit range",
+        "非ゼロ体積のみfit": "Fit non-zero volumes only",
+        "fit alpha_e 下限": "fit alpha_e lower",
+        "fit alpha_e 上限": "fit alpha_e upper",
+        "計算確認": "Calculation check",
+        "最大体積": "Maximum volume",
+        "先頭時刻体積": "First time volume",
+        "平均接触角": "Average contact angle",
+        "固定theta": "Fixed theta",
+        "実行": "Run",
+        "解析実行": "Run analysis",
+        "停止": "Stop",
+        "結果": "Results",
+        "CSV出力": "Export CSV",
+        "PNG出力": "Export PNG",
+        "全ケースPNG出力": "Export all case PNGs",
+        "グラフ表示設定": "Graph display settings",
+        "色": "Color",
+        "点色": "Point color",
+        "点サイズ": "Point size",
+        "透明度": "Opacity",
+        "文字": "Text",
+        "マーカー": "Marker",
+        "縦横": "Aspect",
+        "自動": "Auto",
+        "等倍": "Equal",
+        "タイトル": "Title",
+        "軸ラベル": "Axis labels",
+        "目盛": "Ticks",
+        "グリッド": "Grid",
+        "軸対象": "Axis target",
+        "軸モード": "Axis mode",
+        "現在グラフ": "Current graph",
+        "自動固定": "Auto fixed",
+        "手動固定": "Manual fixed",
+        "x最小": "x min",
+        "x最大": "x max",
+        "y最小": "y min",
+        "y最大": "y max",
+        "x対数": "x log",
+        "y対数": "y log",
+        "PNG幅[in]": "PNG width [in]",
+        "PNG高さ[in]": "PNG height [in]",
+        "画質": "Quality",
+        "透明背景": "Transparent background",
+        "低 150dpi": "Low 150dpi",
+        "標準 300dpi": "Standard 300dpi",
+        "高 600dpi": "High 600dpi",
+        "ケース": "Case",
+        "時刻": "Time",
+        "GIF範囲": "GIF range",
+        "可視化するケースと時刻を選択してください": "Select a case and time to visualize",
+        "時刻数": "Time count",
+        "最大体積": "Max volume",
+        "最終体積": "Final volume",
+        "蒸発完了時刻": "Evaporation time",
+        "初期接触角": "Initial contact angle",
+        "最終有効接触角": "Final valid contact angle",
+        "初期接触半径": "Initial contact radius",
+        "最終有効接触半径": "Final valid contact radius",
+        "推定alpha_e": "Estimated alpha_e",
+        "fit状態": "fit status",
+        "状態": "Status",
+        "エラー": "Error",
+        "体積-時間": "Volume-Time",
+        "等価半径-時間": "Equivalent radius-Time",
+        "接触角-時間": "Contact angle-Time",
+        "接触半径-時間": "Contact radius-Time",
+        "蒸発量 EM": "Evaporated mass EM",
+        "理論/MD 等価半径": "Theory/MD equivalent radius",
+        "上下2枚": "Two stacked graphs",
+        "保存する理論グラフ": "Theory graph to save",
+        "全ケースPNG出力するグラフを選択してください。": "Select the graph to export as PNG for all cases.",
+        "保存先フォルダ": "Destination folder",
+        "親フォルダを選択": "Select parent folder",
+        "現在のグラフを保存": "Save current graph",
+        "蒸発量 EM-時間": "Evaporated mass EM-Time",
+        "理論/MD 等価半径-時間": "Theory/MD equivalent radius-Time",
+        "fit推定": "fit estimate",
+        "可視化": "Visualization",
+        "ケース: -": "Case: -",
+        "時刻: -": "Time: -",
+        "前": "Prev",
+        "次": "Next",
+        "表示": "View",
+        "2D診断": "2D diagnostics",
+        "3D概観": "3D overview",
+        "投影": "Projection",
+        "粒子周期表示": "Periodic particles",
+        "点": "Points",
+        "最大表示点数": "Max displayed points",
+        "凡例": "Legend",
+        "軸目盛": "Axis ticks",
+        "情報": "Info",
+        "液滴セル": "Droplet cells",
+        "fit診断": "fit diagnostics",
+        "GIF範囲: -": "GIF range: -",
+        "開始": "Start",
+        "終了": "End",
+        "PNG保存": "Save PNG",
+        "GIF保存": "Save GIF",
+        "ログ": "Log",
+        "PNG出力プレビュー": "PNG export preview",
+        "保存するグラフ": "Graph to save",
+        "軸": "Axis",
+        "幅 [in]": "Width [in]",
+        "高さ [in]": "Height [in]",
+        "PNG": "PNG",
+        "保存": "Save",
+        "キャンセル": "Cancel",
+        "グラフ": "Graph",
+    },
+    "zh": {
+        "mdFOAM 密度解析アプリ": "mdFOAM 密度分析器",
+        "言語": "语言",
+        "入力": "输入",
+        "入力元": "输入源",
+        "ローカル": "本地",
+        "選択中": "当前选择",
+        "更新": "刷新",
+        "ローカルフォルダ": "本地文件夹",
+        "フォルダを選択": "选择文件夹",
+        "解析対象ケースを含むフォルダを選択します。": "选择包含待分析案例的文件夹。",
+        "SSH/SFTP接続": "SSH/SFTP 连接",
+        "参照": "浏览",
+        "資格情報を保存": "保存凭据",
+        "プロファイル": "配置文件",
+        "ホスト": "主机",
+        "ポート": "端口",
+        "ユーザー": "用户",
+        "OpenSSH秘密鍵": "OpenSSH 私钥",
+        "パスフレーズ/パスワード": "密码短语/密码",
+        "リモートパス": "远程路径",
+        "リモートフォルダ": "远程文件夹",
+        "接続/更新": "连接/刷新",
+        "上へ": "向上",
+        "開く": "打开",
+        "このフォルダを選択": "选择此文件夹",
+        "キャッシュ削除": "清除缓存",
+        "ケース一覧": "案例列表",
+        "解析設定": "分析设置",
+        "基本設定": "基本设置",
+        "密度フィールド": "密度场",
+        "密度しきい値": "密度阈值",
+        "0判定許容値": "零判定容差",
+        "連続ゼロ数": "连续零数量",
+        "詳細設定": "高级设置",
+        "セル体積 fallback": "单元体积备用值",
+        "接触角fit下限": "接触角拟合下限",
+        "接触角fit上限": "接触角拟合上限",
+        "平均接触角の対象範囲": "平均接触角范围",
+        "xy周期補正": "xy 周期修正",
+        "有効": "启用",
+        "蒸発係数 / 理論比較": "蒸发系数 / 理论比较",
+        "物性値プリセット": "物性预设",
+        "飽和蒸気密度 rho_v [kg/m^3]": "饱和蒸气密度 rho_v [kg/m^3]",
+        "液体密度 rho_l [kg/m^3]": "液体密度 rho_l [kg/m^3]",
+        "温度 T [K]": "温度 T [K]",
+        "分子1個の質量 m [kg]": "单个分子质量 m [kg]",
+        "理論初期体積 V0": "理论初始体积 V0",
+        "接触角ソース": "接触角来源",
+        "固定theta [deg]": "固定 theta [deg]",
+        "fit対象範囲": "拟合范围",
+        "非ゼロ体積のみfit": "仅拟合非零体积",
+        "fit alpha_e 下限": "fit alpha_e 下限",
+        "fit alpha_e 上限": "fit alpha_e 上限",
+        "計算確認": "计算检查",
+        "最大体積": "最大体积",
+        "先頭時刻体積": "首个时刻体积",
+        "平均接触角": "平均接触角",
+        "固定theta": "固定 theta",
+        "実行": "执行",
+        "解析実行": "运行分析",
+        "停止": "停止",
+        "結果": "结果",
+        "CSV出力": "导出 CSV",
+        "PNG出力": "导出 PNG",
+        "全ケースPNG出力": "导出所有案例 PNG",
+        "グラフ表示設定": "图表显示设置",
+        "色": "颜色",
+        "点色": "点颜色",
+        "点サイズ": "点大小",
+        "透明度": "透明度",
+        "文字": "文字",
+        "マーカー": "标记",
+        "縦横": "纵横比",
+        "自動": "自动",
+        "等倍": "等比例",
+        "タイトル": "标题",
+        "軸ラベル": "轴标签",
+        "目盛": "刻度",
+        "グリッド": "网格",
+        "軸対象": "轴目标",
+        "軸モード": "轴模式",
+        "現在グラフ": "当前图表",
+        "自動固定": "自动固定",
+        "手動固定": "手动固定",
+        "x最小": "x 最小",
+        "x最大": "x 最大",
+        "y最小": "y 最小",
+        "y最大": "y 最大",
+        "x対数": "x 对数",
+        "y対数": "y 对数",
+        "PNG幅[in]": "PNG 宽度 [in]",
+        "PNG高さ[in]": "PNG 高度 [in]",
+        "画質": "质量",
+        "透明背景": "透明背景",
+        "低 150dpi": "低 150dpi",
+        "標準 300dpi": "标准 300dpi",
+        "高 600dpi": "高 600dpi",
+        "ケース": "案例",
+        "時刻": "时刻",
+        "GIF範囲": "GIF 范围",
+        "可視化するケースと時刻を選択してください": "请选择要可视化的案例和时刻",
+        "時刻数": "时刻数",
+        "最大体積": "最大体积",
+        "最終体積": "最终体积",
+        "蒸発完了時刻": "蒸发完成时刻",
+        "初期接触角": "初始接触角",
+        "最終有効接触角": "最终有效接触角",
+        "初期接触半径": "初始接触半径",
+        "最終有効接触半径": "最终有效接触半径",
+        "推定alpha_e": "估计 alpha_e",
+        "fit状態": "fit 状态",
+        "状態": "状态",
+        "エラー": "错误",
+        "体積-時間": "体积-时间",
+        "等価半径-時間": "等效半径-时间",
+        "接触角-時間": "接触角-时间",
+        "接触半径-時間": "接触半径-时间",
+        "蒸発量 EM": "蒸发量 EM",
+        "理論/MD 等価半径": "理论/MD 等效半径",
+        "上下2枚": "上下两图",
+        "保存する理論グラフ": "要保存的理论图表",
+        "全ケースPNG出力するグラフを選択してください。": "请选择要为所有案例导出 PNG 的图表。",
+        "保存先フォルダ": "保存目标文件夹",
+        "親フォルダを選択": "选择父文件夹",
+        "現在のグラフを保存": "保存当前图表",
+        "蒸発量 EM-時間": "蒸发量 EM-时间",
+        "理論/MD 等価半径-時間": "理论/MD 等效半径-时间",
+        "fit推定": "fit 估计",
+        "可視化": "可视化",
+        "ケース: -": "案例: -",
+        "時刻: -": "时刻: -",
+        "前": "前",
+        "次": "后",
+        "表示": "显示",
+        "2D診断": "2D 诊断",
+        "3D概観": "3D 概览",
+        "投影": "投影",
+        "粒子周期表示": "粒子周期显示",
+        "点": "点",
+        "最大表示点数": "最大显示点数",
+        "凡例": "图例",
+        "軸目盛": "轴刻度",
+        "情報": "信息",
+        "液滴セル": "液滴单元",
+        "fit診断": "fit 诊断",
+        "GIF範囲: -": "GIF 范围: -",
+        "開始": "开始",
+        "終了": "结束",
+        "PNG保存": "保存 PNG",
+        "GIF保存": "保存 GIF",
+        "ログ": "日志",
+        "PNG出力プレビュー": "PNG 导出预览",
+        "保存するグラフ": "要保存的图表",
+        "軸": "轴",
+        "幅 [in]": "宽度 [in]",
+        "高さ [in]": "高度 [in]",
+        "PNG": "PNG",
+        "保存": "保存",
+        "キャンセル": "取消",
+        "グラフ": "图表",
+    },
+    "es": {
+        "mdFOAM 密度解析アプリ": "Analizador de densidad mdFOAM",
+        "言語": "Idioma",
+        "入力": "Entrada",
+        "入力元": "Fuente de entrada",
+        "ローカル": "Local",
+        "選択中": "Seleccionado",
+        "更新": "Actualizar",
+        "ローカルフォルダ": "Carpeta local",
+        "フォルダを選択": "Seleccionar carpeta",
+        "解析対象ケースを含むフォルダを選択します。": "Seleccione una carpeta que contenga los casos a analizar.",
+        "SSH/SFTP接続": "Conexión SSH/SFTP",
+        "参照": "Examinar",
+        "資格情報を保存": "Guardar credenciales",
+        "プロファイル": "Perfil",
+        "ホスト": "Host",
+        "ポート": "Puerto",
+        "ユーザー": "Usuario",
+        "OpenSSH秘密鍵": "Clave privada OpenSSH",
+        "パスフレーズ/パスワード": "Frase/contraseña",
+        "リモートパス": "Ruta remota",
+        "リモートフォルダ": "Carpeta remota",
+        "接続/更新": "Conectar/actualizar",
+        "上へ": "Arriba",
+        "開く": "Abrir",
+        "このフォルダを選択": "Seleccionar esta carpeta",
+        "キャッシュ削除": "Borrar caché",
+        "ケース一覧": "Casos",
+        "解析設定": "Ajustes de análisis",
+        "基本設定": "Ajustes básicos",
+        "密度フィールド": "Campo de densidad",
+        "密度しきい値": "Umbral de densidad",
+        "0判定許容値": "Tolerancia de cero",
+        "連続ゼロ数": "Ceros consecutivos",
+        "詳細設定": "Ajustes avanzados",
+        "セル体積 fallback": "Volumen de celda alternativo",
+        "接触角fit下限": "Límite inferior fit ángulo",
+        "接触角fit上限": "Límite superior fit ángulo",
+        "平均接触角の対象範囲": "Rango de ángulo medio",
+        "xy周期補正": "Corrección periódica xy",
+        "有効": "Activado",
+        "蒸発係数 / 理論比較": "Coef. evaporación / teoría",
+        "物性値プリセット": "Preajuste de material",
+        "飽和蒸気密度 rho_v [kg/m^3]": "Densidad vapor saturado rho_v [kg/m^3]",
+        "液体密度 rho_l [kg/m^3]": "Densidad líquida rho_l [kg/m^3]",
+        "温度 T [K]": "Temperatura T [K]",
+        "分子1個の質量 m [kg]": "Masa por molécula m [kg]",
+        "理論初期体積 V0": "Volumen inicial teórico V0",
+        "接触角ソース": "Fuente de ángulo",
+        "固定theta [deg]": "theta fijo [deg]",
+        "fit対象範囲": "Rango de fit",
+        "非ゼロ体積のみfit": "Fit solo volumen no cero",
+        "fit alpha_e 下限": "fit alpha_e inferior",
+        "fit alpha_e 上限": "fit alpha_e superior",
+        "計算確認": "Comprobación",
+        "最大体積": "Volumen máximo",
+        "先頭時刻体積": "Volumen inicial",
+        "平均接触角": "Ángulo de contacto medio",
+        "固定theta": "theta fijo",
+        "実行": "Ejecución",
+        "解析実行": "Ejecutar análisis",
+        "停止": "Detener",
+        "結果": "Resultados",
+        "CSV出力": "Exportar CSV",
+        "PNG出力": "Exportar PNG",
+        "全ケースPNG出力": "Exportar PNG de todos",
+        "グラフ表示設定": "Ajustes de gráfico",
+        "色": "Color",
+        "点色": "Color de puntos",
+        "点サイズ": "Tamaño de punto",
+        "透明度": "Opacidad",
+        "文字": "Texto",
+        "マーカー": "Marcador",
+        "縦横": "Aspecto",
+        "自動": "Auto",
+        "等倍": "Igual",
+        "タイトル": "Título",
+        "軸ラベル": "Etiquetas de eje",
+        "目盛": "Marcas",
+        "グリッド": "Cuadrícula",
+        "軸対象": "Objetivo de eje",
+        "軸モード": "Modo de eje",
+        "現在グラフ": "Gráfico actual",
+        "自動固定": "Fijo automático",
+        "手動固定": "Fijo manual",
+        "x最小": "x mín",
+        "x最大": "x máx",
+        "y最小": "y mín",
+        "y最大": "y máx",
+        "x対数": "x log",
+        "y対数": "y log",
+        "PNG幅[in]": "Ancho PNG [in]",
+        "PNG高さ[in]": "Alto PNG [in]",
+        "画質": "Calidad",
+        "透明背景": "Fondo transparente",
+        "低 150dpi": "Baja 150dpi",
+        "標準 300dpi": "Estándar 300dpi",
+        "高 600dpi": "Alta 600dpi",
+        "ケース": "Caso",
+        "時刻": "Tiempo",
+        "GIF範囲": "Rango GIF",
+        "可視化するケースと時刻を選択してください": "Seleccione un caso y un tiempo para visualizar",
+        "時刻数": "Núm. tiempos",
+        "最大体積": "Volumen máx.",
+        "最終体積": "Volumen final",
+        "蒸発完了時刻": "Tiempo evaporación",
+        "初期接触角": "Ángulo inicial",
+        "最終有効接触角": "Ángulo válido final",
+        "初期接触半径": "Radio contacto inicial",
+        "最終有効接触半径": "Radio contacto final",
+        "推定alpha_e": "alpha_e estimado",
+        "fit状態": "estado fit",
+        "状態": "Estado",
+        "エラー": "Error",
+        "体積-時間": "Volumen-Tiempo",
+        "等価半径-時間": "Radio equivalente-Tiempo",
+        "接触角-時間": "Ángulo-Tiempo",
+        "接触半径-時間": "Radio contacto-Tiempo",
+        "蒸発量 EM": "Masa evaporada EM",
+        "理論/MD 等価半径": "Radio equivalente teoría/MD",
+        "上下2枚": "Dos gráficos apilados",
+        "保存する理論グラフ": "Gráfico teórico a guardar",
+        "全ケースPNG出力するグラフを選択してください。": "Seleccione el gráfico que se exportará como PNG para todos los casos.",
+        "保存先フォルダ": "Carpeta de destino",
+        "親フォルダを選択": "Seleccionar carpeta principal",
+        "現在のグラフを保存": "Guardar gráfico actual",
+        "蒸発量 EM-時間": "Masa evaporada EM-Tiempo",
+        "理論/MD 等価半径-時間": "Radio equivalente teoría/MD-Tiempo",
+        "fit推定": "estimación fit",
+        "可視化": "Visualización",
+        "ケース: -": "Caso: -",
+        "時刻: -": "Tiempo: -",
+        "前": "Anterior",
+        "次": "Siguiente",
+        "表示": "Vista",
+        "2D診断": "Diagnóstico 2D",
+        "3D概観": "Vista 3D",
+        "投影": "Proyección",
+        "粒子周期表示": "Partículas periódicas",
+        "点": "Puntos",
+        "最大表示点数": "Máx. puntos",
+        "凡例": "Leyenda",
+        "軸目盛": "Marcas de eje",
+        "情報": "Información",
+        "液滴セル": "Celdas de gota",
+        "fit診断": "diagnóstico fit",
+        "GIF範囲: -": "Rango GIF: -",
+        "開始": "Inicio",
+        "終了": "Fin",
+        "PNG保存": "Guardar PNG",
+        "GIF保存": "Guardar GIF",
+        "ログ": "Registro",
+        "PNG出力プレビュー": "Vista previa PNG",
+        "保存するグラフ": "Gráfico a guardar",
+        "軸": "Eje",
+        "幅 [in]": "Ancho [in]",
+        "高さ [in]": "Alto [in]",
+        "PNG": "PNG",
+        "保存": "Guardar",
+        "キャンセル": "Cancelar",
+        "グラフ": "Gráfico",
+    },
+    "hi": {
+        "mdFOAM 密度解析アプリ": "mdFOAM घनत्व विश्लेषक",
+        "言語": "भाषा",
+        "入力": "इनपुट",
+        "入力元": "इनपुट स्रोत",
+        "ローカル": "स्थानीय",
+        "選択中": "चयनित",
+        "更新": "रीफ्रेश",
+        "ローカルフォルダ": "स्थानीय फ़ोल्डर",
+        "フォルダを選択": "फ़ोल्डर चुनें",
+        "解析対象ケースを含むフォルダを選択します。": "विश्लेषण केस वाले फ़ोल्डर को चुनें।",
+        "SSH/SFTP接続": "SSH/SFTP कनेक्शन",
+        "参照": "ब्राउज़",
+        "資格情報を保存": "क्रेडेंशियल सहेजें",
+        "プロファイル": "प्रोफ़ाइल",
+        "ホスト": "होस्ट",
+        "ポート": "पोर्ट",
+        "ユーザー": "उपयोगकर्ता",
+        "OpenSSH秘密鍵": "OpenSSH निजी कुंजी",
+        "パスフレーズ/パスワード": "पासफ्रेज़/पासवर्ड",
+        "リモートパス": "रिमोट पथ",
+        "リモートフォルダ": "रिमोट फ़ोल्डर",
+        "接続/更新": "कनेक्ट/रीफ्रेश",
+        "上へ": "ऊपर",
+        "開く": "खोलें",
+        "このフォルダを選択": "यह फ़ोल्डर चुनें",
+        "キャッシュ削除": "कैश हटाएं",
+        "ケース一覧": "केस",
+        "解析設定": "विश्लेषण सेटिंग",
+        "基本設定": "मूल सेटिंग",
+        "密度フィールド": "घनत्व फ़ील्ड",
+        "密度しきい値": "घनत्व सीमा",
+        "0判定許容値": "शून्य सहनशीलता",
+        "連続ゼロ数": "लगातार शून्य",
+        "詳細設定": "उन्नत सेटिंग",
+        "セル体積 fallback": "सेल आयतन fallback",
+        "接触角fit下限": "संपर्क कोण fit निचली सीमा",
+        "接触角fit上限": "संपर्क कोण fit ऊपरी सीमा",
+        "平均接触角の対象範囲": "औसत संपर्क कोण रेंज",
+        "xy周期補正": "xy आवधिक सुधार",
+        "有効": "सक्षम",
+        "蒸発係数 / 理論比較": "वाष्पीकरण गुणांक / सिद्धांत",
+        "物性値プリセット": "गुण preset",
+        "飽和蒸気密度 rho_v [kg/m^3]": "संतृप्त वाष्प घनत्व rho_v [kg/m^3]",
+        "液体密度 rho_l [kg/m^3]": "द्रव घनत्व rho_l [kg/m^3]",
+        "温度 T [K]": "तापमान T [K]",
+        "分子1個の質量 m [kg]": "प्रति अणु द्रव्यमान m [kg]",
+        "理論初期体積 V0": "सैद्धांतिक आरंभिक आयतन V0",
+        "接触角ソース": "संपर्क कोण स्रोत",
+        "固定theta [deg]": "स्थिर theta [deg]",
+        "fit対象範囲": "fit रेंज",
+        "非ゼロ体積のみfit": "केवल गैर-शून्य आयतन fit",
+        "fit alpha_e 下限": "fit alpha_e निचली सीमा",
+        "fit alpha_e 上限": "fit alpha_e ऊपरी सीमा",
+        "計算確認": "गणना जांच",
+        "最大体積": "अधिकतम आयतन",
+        "先頭時刻体積": "पहला समय आयतन",
+        "平均接触角": "औसत संपर्क कोण",
+        "固定theta": "स्थिर theta",
+        "実行": "चलाएं",
+        "解析実行": "विश्लेषण चलाएं",
+        "停止": "रोकें",
+        "結果": "परिणाम",
+        "CSV出力": "CSV निर्यात",
+        "PNG出力": "PNG निर्यात",
+        "全ケースPNG出力": "सभी केस PNG निर्यात",
+        "グラフ表示設定": "ग्राफ़ प्रदर्शन सेटिंग",
+        "色": "रंग",
+        "点色": "बिंदु रंग",
+        "点サイズ": "बिंदु आकार",
+        "透明度": "अपारदर्शिता",
+        "文字": "पाठ",
+        "マーカー": "मार्कर",
+        "縦横": "आस्पेक्ट",
+        "自動": "स्वतः",
+        "等倍": "समान",
+        "タイトル": "शीर्षक",
+        "軸ラベル": "अक्ष लेबल",
+        "目盛": "टिक",
+        "グリッド": "ग्रिड",
+        "軸対象": "अक्ष लक्ष्य",
+        "軸モード": "अक्ष मोड",
+        "現在グラフ": "वर्तमान ग्राफ़",
+        "自動固定": "स्वतः स्थिर",
+        "手動固定": "मैनुअल स्थिर",
+        "x最小": "x न्यून",
+        "x最大": "x अधिक",
+        "y最小": "y न्यून",
+        "y最大": "y अधिक",
+        "x対数": "x log",
+        "y対数": "y log",
+        "PNG幅[in]": "PNG चौड़ाई [in]",
+        "PNG高さ[in]": "PNG ऊंचाई [in]",
+        "画質": "गुणवत्ता",
+        "透明背景": "पारदर्शी पृष्ठभूमि",
+        "低 150dpi": "कम 150dpi",
+        "標準 300dpi": "मानक 300dpi",
+        "高 600dpi": "उच्च 600dpi",
+        "ケース": "केस",
+        "時刻": "समय",
+        "GIF範囲": "GIF रेंज",
+        "可視化するケースと時刻を選択してください": "विज़ुअलाइज़ करने के लिए केस और समय चुनें",
+        "時刻数": "समय संख्या",
+        "最大体積": "अधिकतम आयतन",
+        "最終体積": "अंतिम आयतन",
+        "蒸発完了時刻": "वाष्पीकरण समय",
+        "初期接触角": "आरंभिक संपर्क कोण",
+        "最終有効接触角": "अंतिम वैध संपर्क कोण",
+        "初期接触半径": "आरंभिक संपर्क त्रिज्या",
+        "最終有効接触半径": "अंतिम वैध संपर्क त्रिज्या",
+        "推定alpha_e": "अनुमानित alpha_e",
+        "fit状態": "fit स्थिति",
+        "状態": "स्थिति",
+        "エラー": "त्रुटि",
+        "体積-時間": "आयतन-समय",
+        "等価半径-時間": "समतुल्य त्रिज्या-समय",
+        "接触角-時間": "संपर्क कोण-समय",
+        "接触半径-時間": "संपर्क त्रिज्या-समय",
+        "蒸発量 EM": "वाष्पित द्रव्यमान EM",
+        "理論/MD 等価半径": "सिद्धांत/MD समतुल्य त्रिज्या",
+        "上下2枚": "दो स्टैक किए ग्राफ़",
+        "保存する理論グラフ": "सहेजने वाला सिद्धांत ग्राफ़",
+        "全ケースPNG出力するグラフを選択してください。": "सभी केस के लिए PNG निर्यात करने वाला ग्राफ़ चुनें।",
+        "保存先フォルダ": "गंतव्य फ़ोल्डर",
+        "親フォルダを選択": "पैरेंट फ़ोल्डर चुनें",
+        "現在のグラフを保存": "वर्तमान ग्राफ़ सहेजें",
+        "蒸発量 EM-時間": "वाष्पित द्रव्यमान EM-समय",
+        "理論/MD 等価半径-時間": "सिद्धांत/MD समतुल्य त्रिज्या-समय",
+        "fit推定": "fit अनुमान",
+        "可視化": "विज़ुअलाइज़ेशन",
+        "ケース: -": "केस: -",
+        "時刻: -": "समय: -",
+        "前": "पिछला",
+        "次": "अगला",
+        "表示": "दृश्य",
+        "2D診断": "2D निदान",
+        "3D概観": "3D अवलोकन",
+        "投影": "प्रोजेक्शन",
+        "粒子周期表示": "आवधिक कण",
+        "点": "बिंदु",
+        "最大表示点数": "अधिकतम बिंदु",
+        "凡例": "लीजेंड",
+        "軸目盛": "अक्ष टिक",
+        "情報": "जानकारी",
+        "液滴セル": "बूंद सेल",
+        "fit診断": "fit निदान",
+        "GIF範囲: -": "GIF रेंज: -",
+        "開始": "आरंभ",
+        "終了": "समाप्त",
+        "PNG保存": "PNG सहेजें",
+        "GIF保存": "GIF सहेजें",
+        "ログ": "लॉग",
+        "PNG出力プレビュー": "PNG निर्यात पूर्वावलोकन",
+        "保存するグラフ": "सहेजने वाला ग्राफ़",
+        "軸": "अक्ष",
+        "幅 [in]": "चौड़ाई [in]",
+        "高さ [in]": "ऊंचाई [in]",
+        "PNG": "PNG",
+        "保存": "सहेजें",
+        "キャンセル": "रद्द",
+        "グラフ": "ग्राफ़",
+    },
+}
+
 THREE_D_AUTO_MAX_POINTS = 50_000
 QUALITY_DPI_OPTIONS = {
     "低 150dpi": 150,
@@ -114,6 +773,30 @@ QUALITY_DPI_OPTIONS = {
     "高 600dpi": 600,
 }
 DEFAULT_QUALITY_LABEL = "標準 300dpi"
+
+
+def _tr(text: str, language: str = "ja") -> str:
+    if language == "ja":
+        return text
+    return TRANSLATIONS.get(language, {}).get(text, text)
+
+
+def _combo_set_items(combo: QComboBox, items: list[tuple[str, object]], language: str = "ja") -> None:
+    current_data = combo.currentData()
+    combo.blockSignals(True)
+    combo.clear()
+    for label, data in items:
+        combo.addItem(_tr(label, language), data)
+    if current_data is not None:
+        index = combo.findData(current_data)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+    combo.blockSignals(False)
+
+
+def _combo_data(combo: QComboBox, default: str = "") -> str:
+    data = combo.currentData()
+    return default if data is None else str(data)
 
 
 @dataclass
@@ -132,7 +815,7 @@ class GraphSettings:
     x_max: float = 1.0
     y_min: float = 0.0
     y_max: float = 1.0
-    aspect: str = "自動"
+    aspect: str = "auto"
     x_log: bool = False
     y_log: bool = False
     marker: str = "o"
@@ -488,7 +1171,7 @@ class PlotWidget(QWidget):
                 axis.set_xlim(settings.x_min, settings.x_max)
             if settings.y_min < settings.y_max:
                 axis.set_ylim(settings.y_min, settings.y_max)
-        if settings.aspect == "等倍":
+        if settings.aspect == "equal":
             axis.set_aspect("equal", adjustable="box")
         else:
             axis.set_aspect("auto")
@@ -560,7 +1243,8 @@ class GraphPngPreviewDialog(QDialog):
         suggested_filename: str = "graph.png",
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("PNG出力プレビュー")
+        self.language = getattr(parent, "language", "ja")
+        self.setWindowTitle(_tr("PNG出力プレビュー", self.language))
         self.resize(1100, 760)
         self.start_dir = start_dir
         self.suggested_filename = suggested_filename
@@ -571,7 +1255,7 @@ class GraphPngPreviewDialog(QDialog):
                 for item in source_plot
             ]
         else:
-            self.source_options = [("グラフ", [source_plot], suggested_filename)]
+            self.source_options = [(_tr("グラフ", self.language), [source_plot], suggested_filename)]
 
         self.preview_widgets: list[PlotWidget | CombinedPlotWidget] = []
         for _label, plots, _filename in self.source_options:
@@ -587,7 +1271,7 @@ class GraphPngPreviewDialog(QDialog):
         body = QHBoxLayout()
         layout.addLayout(body, 1)
 
-        settings_group = QGroupBox("グラフ表示設定")
+        settings_group = QGroupBox(_tr("グラフ表示設定", self.language))
         settings_layout = QVBoxLayout(settings_group)
         body.addWidget(settings_group, 0)
         self.preview_stack = QStackedWidget()
@@ -600,19 +1284,19 @@ class GraphPngPreviewDialog(QDialog):
             source_row = QHBoxLayout()
             self.source_combo = QComboBox()
             self.source_combo.addItems([label for label, _plots, _filename in self.source_options])
-            source_row.addWidget(QLabel("保存するグラフ"))
+            source_row.addWidget(QLabel(_tr("保存するグラフ", self.language)))
             source_row.addWidget(self.source_combo)
             settings_layout.addLayout(source_row)
 
         color_row = QHBoxLayout()
-        self.color_button = QPushButton("色")
+        self.color_button = QPushButton(_tr("色", self.language))
         self.point_size_spin = self._double_spin(1.0, 200.0, 1, self.preview_plot.settings.point_size)
         self.alpha_spin = self._double_spin(0.05, 1.0, 2, self.preview_plot.settings.point_alpha, 0.05)
-        color_row.addWidget(QLabel("点色"))
+        color_row.addWidget(QLabel(_tr("点色", self.language)))
         color_row.addWidget(self.color_button)
-        color_row.addWidget(QLabel("点サイズ"))
+        color_row.addWidget(QLabel(_tr("点サイズ", self.language)))
         color_row.addWidget(self.point_size_spin)
-        color_row.addWidget(QLabel("透明度"))
+        color_row.addWidget(QLabel(_tr("透明度", self.language)))
         color_row.addWidget(self.alpha_spin)
         settings_layout.addLayout(color_row)
 
@@ -625,63 +1309,66 @@ class GraphPngPreviewDialog(QDialog):
         self.marker_combo.addItems(["o", "s", "^", "D", "x", "+", "."])
         self.marker_combo.setCurrentText(self.preview_plot.settings.marker)
         self.aspect_combo = QComboBox()
-        self.aspect_combo.addItems(["自動", "等倍"])
-        self.aspect_combo.setCurrentText(self.preview_plot.settings.aspect)
-        style_row.addWidget(QLabel("文字"))
+        _combo_set_items(self.aspect_combo, [("自動", "auto"), ("等倍", "equal")], self.language)
+        index = self.aspect_combo.findData(self.preview_plot.settings.aspect)
+        self.aspect_combo.setCurrentIndex(index if index >= 0 else 0)
+        style_row.addWidget(QLabel(_tr("文字", self.language)))
         style_row.addWidget(self.font_size_spin)
-        style_row.addWidget(QLabel("マーカー"))
+        style_row.addWidget(QLabel(_tr("マーカー", self.language)))
         style_row.addWidget(self.marker_combo)
-        style_row.addWidget(QLabel("縦横"))
+        style_row.addWidget(QLabel(_tr("縦横", self.language)))
         style_row.addWidget(self.aspect_combo)
         settings_layout.addLayout(style_row)
 
         visibility_row = QHBoxLayout()
-        self.title_check = QCheckBox("タイトル")
-        self.axis_label_check = QCheckBox("軸ラベル")
-        self.tick_label_check = QCheckBox("目盛")
-        self.grid_check = QCheckBox("グリッド")
+        self.title_check = QCheckBox(_tr("タイトル", self.language))
+        self.axis_label_check = QCheckBox(_tr("軸ラベル", self.language))
+        self.tick_label_check = QCheckBox(_tr("目盛", self.language))
+        self.grid_check = QCheckBox(_tr("グリッド", self.language))
         visibility_row.addWidget(self.title_check)
         visibility_row.addWidget(self.axis_label_check)
         visibility_row.addWidget(self.tick_label_check)
         visibility_row.addWidget(self.grid_check)
         settings_layout.addLayout(visibility_row)
 
-        axis_group = QGroupBox("軸")
+        axis_group = QGroupBox(_tr("軸", self.language))
         axis_layout = QFormLayout(axis_group)
-        self.axis_auto_check = QCheckBox("自動")
+        self.axis_auto_check = QCheckBox(_tr("自動", self.language))
         self.x_min_spin = self._signed_spin(self.preview_plot.settings.x_min)
         self.x_max_spin = self._signed_spin(self.preview_plot.settings.x_max)
         self.y_min_spin = self._signed_spin(self.preview_plot.settings.y_min)
         self.y_max_spin = self._signed_spin(self.preview_plot.settings.y_max)
-        self.x_log_check = QCheckBox("x対数")
-        self.y_log_check = QCheckBox("y対数")
+        self.x_log_check = QCheckBox(_tr("x対数", self.language))
+        self.y_log_check = QCheckBox(_tr("y対数", self.language))
         axis_layout.addRow("", self.axis_auto_check)
-        axis_layout.addRow("x最小", self.x_min_spin)
-        axis_layout.addRow("x最大", self.x_max_spin)
-        axis_layout.addRow("y最小", self.y_min_spin)
-        axis_layout.addRow("y最大", self.y_max_spin)
+        axis_layout.addRow(_tr("x最小", self.language), self.x_min_spin)
+        axis_layout.addRow(_tr("x最大", self.language), self.x_max_spin)
+        axis_layout.addRow(_tr("y最小", self.language), self.y_min_spin)
+        axis_layout.addRow(_tr("y最大", self.language), self.y_max_spin)
         axis_layout.addRow("", self.x_log_check)
         axis_layout.addRow("", self.y_log_check)
         settings_layout.addWidget(axis_group)
 
-        output_group = QGroupBox("PNG")
+        output_group = QGroupBox(_tr("PNG", self.language))
         output_layout = QFormLayout(output_group)
         self.width_spin = self._double_spin(1.0, 30.0, 1, self.preview_plot.settings.image_width)
         self.height_spin = self._double_spin(1.0, 30.0, 1, self.preview_plot.settings.image_height)
         self.quality_combo = QComboBox()
-        self.quality_combo.addItems(list(QUALITY_DPI_OPTIONS.keys()))
-        self.quality_combo.setCurrentText(_quality_label_for_dpi(self.preview_plot.settings.dpi))
-        self.transparent_check = QCheckBox("透明背景")
-        output_layout.addRow("幅 [in]", self.width_spin)
-        output_layout.addRow("高さ [in]", self.height_spin)
-        output_layout.addRow("画質", self.quality_combo)
+        for label, dpi in QUALITY_DPI_OPTIONS.items():
+            self.quality_combo.addItem(_tr(label, self.language), dpi)
+        quality_index = self.quality_combo.findData(self.preview_plot.settings.dpi)
+        self.quality_combo.setCurrentIndex(quality_index if quality_index >= 0 else 1)
+        self.transparent_check = QCheckBox(_tr("透明背景", self.language))
+        output_layout.addRow(_tr("幅 [in]", self.language), self.width_spin)
+        output_layout.addRow(_tr("高さ [in]", self.language), self.height_spin)
+        output_layout.addRow(_tr("画質", self.language), self.quality_combo)
         output_layout.addRow("", self.transparent_check)
         settings_layout.addWidget(output_group)
         settings_layout.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Save).setText("保存")
-        buttons.button(QDialogButtonBox.Cancel).setText("キャンセル")
+        buttons.button(QDialogButtonBox.Save).setText(_tr("保存", self.language))
+        buttons.button(QDialogButtonBox.Cancel).setText(_tr("キャンセル", self.language))
         layout.addWidget(buttons)
 
         self._load_controls_from_preview()
@@ -761,7 +1448,7 @@ class GraphPngPreviewDialog(QDialog):
 
     @Slot()
     def choose_color(self) -> None:
-        color = QColorDialog.getColor(QColor(self.preview_plot.settings.point_color), self, "点色")
+        color = QColorDialog.getColor(QColor(self.preview_plot.settings.point_color), self, _tr("点色", self.language))
         if not color.isValid():
             return
         self.preview_plot.settings.point_color = color.name()
@@ -787,7 +1474,7 @@ class GraphPngPreviewDialog(QDialog):
         settings.point_alpha = self.alpha_spin.value()
         settings.font_size = self.font_size_spin.value()
         settings.marker = self.marker_combo.currentText()
-        settings.aspect = self.aspect_combo.currentText()
+        settings.aspect = _combo_data(self.aspect_combo, "auto")
         settings.title_visible = self.title_check.isChecked()
         settings.axis_labels_visible = self.axis_label_check.isChecked()
         settings.tick_labels_visible = self.tick_label_check.isChecked()
@@ -801,7 +1488,7 @@ class GraphPngPreviewDialog(QDialog):
         settings.y_log = self.y_log_check.isChecked()
         settings.image_width = self.width_spin.value()
         settings.image_height = self.height_spin.value()
-        settings.dpi = QUALITY_DPI_OPTIONS.get(self.quality_combo.currentText(), QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
+        settings.dpi = int(self.quality_combo.currentData() or QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
         settings.transparent = self.transparent_check.isChecked()
         self._update_axis_spin_enabled()
         self.preview_plot.figure.set_size_inches(settings.image_width, settings.image_height, forward=False)
@@ -825,7 +1512,7 @@ class GraphPngPreviewDialog(QDialog):
         index = self.source_combo.currentIndex() if self.source_combo is not None else 0
         filename = self.source_options[index][2] if 0 <= index < len(self.source_options) else self.suggested_filename
         start_path = str(Path(self.start_dir) / filename)
-        path, _ = QFileDialog.getSaveFileName(self, "現在のグラフを保存", start_path, "PNG (*.png)")
+        path, _ = QFileDialog.getSaveFileName(self, _tr("現在のグラフを保存", self.language), start_path, "PNG (*.png)")
         if not path:
             return
         output_path = Path(path)
@@ -871,7 +1558,7 @@ class VisualizationPlotWidget(QWidget):
         show_fit: bool,
     ) -> None:
         self.figure.clear()
-        is_3d = mode.startswith("3D")
+        is_3d = mode == "3d" or mode.startswith("3D")
         particles = frame.particles.positions
         particle_ids = frame.particles.ids
         downsample = None
@@ -1298,7 +1985,8 @@ def _save_secret(profile_name: str, host: str, username: str, secret: str) -> st
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("mdFOAM 密度解析アプリ")
+        self.language = "ja"
+        self.setWindowTitle(_tr("mdFOAM 密度解析アプリ", self.language))
         self.resize(1360, 900)
 
         self.cases: list[Path] = []
@@ -1321,7 +2009,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._configure_spinbox_input_behavior()
         self._load_ssh_profile()
-        self._set_source_mode("ローカル")
+        self._set_source_mode("local")
         self._connect_signals()
         self.folder_edit.setText(str(Path.cwd()))
         self.load_folder(Path.cwd())
@@ -1330,6 +2018,16 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         root_layout = QVBoxLayout(root)
+
+        language_row = QHBoxLayout()
+        language_row.addStretch(1)
+        self.language_label = QLabel("言語")
+        self.language_combo = QComboBox()
+        for code, label in LANGUAGES.items():
+            self.language_combo.addItem(label, code)
+        language_row.addWidget(self.language_label)
+        language_row.addWidget(self.language_combo)
+        root_layout.addLayout(language_row)
 
         self.workflow_tabs = QTabWidget()
         root_layout.addWidget(self.workflow_tabs, 1)
@@ -1342,7 +2040,7 @@ class MainWindow(QMainWindow):
         source_layout = QVBoxLayout(source_group)
         source_row = QHBoxLayout()
         self.source_combo = QComboBox()
-        self.source_combo.addItems(["ローカル", "SSH"])
+        _combo_set_items(self.source_combo, [("ローカル", "local"), ("SSH", "ssh")], self.language)
         self.folder_edit = QLabel()
         self.folder_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.refresh_button = QPushButton("更新")
@@ -1499,9 +2197,9 @@ class MainWindow(QMainWindow):
         self.theory_temperature_spin = self._scientific_spin(default_theory.temperature)
         self.theory_molecule_mass_spin = self._scientific_spin(default_theory.molecule_mass)
         self.theory_v0_source_combo = QComboBox()
-        self.theory_v0_source_combo.addItems(["最大体積", "先頭時刻体積"])
+        _combo_set_items(self.theory_v0_source_combo, [("最大体積", "max_volume"), ("先頭時刻体積", "first_volume")], self.language)
         self.theory_theta_source_combo = QComboBox()
-        self.theory_theta_source_combo.addItems(["平均接触角", "固定theta"])
+        _combo_set_items(self.theory_theta_source_combo, [("平均接触角", "average"), ("固定theta", "fixed")], self.language)
         self.theory_fixed_theta_spin = QDoubleSpinBox()
         self.theory_fixed_theta_spin.setDecimals(6)
         self.theory_fixed_theta_spin.setRange(0.001, 179.999)
@@ -1588,7 +2286,7 @@ class MainWindow(QMainWindow):
         self.graph_marker_combo = QComboBox()
         self.graph_marker_combo.addItems(["o", "s", "^", "D", "x", "+", "."])
         self.graph_aspect_combo = QComboBox()
-        self.graph_aspect_combo.addItems(["自動", "等倍"])
+        _combo_set_items(self.graph_aspect_combo, [("自動", "auto"), ("等倍", "equal")], self.language)
         self.graph_title_check = QCheckBox("タイトル")
         self.graph_axis_label_check = QCheckBox("軸ラベル")
         self.graph_tick_label_check = QCheckBox("目盛")
@@ -1614,9 +2312,9 @@ class MainWindow(QMainWindow):
 
         graph_row2 = QHBoxLayout()
         self.graph_axis_target_combo = QComboBox()
-        self.graph_axis_target_combo.addItem("現在グラフ", "")
+        self.graph_axis_target_combo.addItem(self.t("現在グラフ"), "")
         self.graph_axis_mode_combo = QComboBox()
-        self.graph_axis_mode_combo.addItems(["自動固定", "手動固定"])
+        _combo_set_items(self.graph_axis_mode_combo, [("自動固定", "auto_fixed"), ("手動固定", "manual_fixed")], self.language)
         self.graph_x_min_spin = self._signed_scientific_spin(0.0)
         self.graph_x_max_spin = self._signed_scientific_spin(1.0)
         self.graph_y_min_spin = self._signed_scientific_spin(0.0)
@@ -1648,7 +2346,8 @@ class MainWindow(QMainWindow):
         self.graph_height_spin.setRange(1.0, 30.0)
         self.graph_height_spin.setDecimals(1)
         self.graph_quality_combo = QComboBox()
-        self.graph_quality_combo.addItems(list(QUALITY_DPI_OPTIONS.keys()))
+        for label, dpi in QUALITY_DPI_OPTIONS.items():
+            self.graph_quality_combo.addItem(_tr(label, self.language), dpi)
         self.graph_transparent_check = QCheckBox("透明背景")
         graph_row3.addWidget(QLabel("PNG幅[in]"))
         graph_row3.addWidget(self.graph_width_spin)
@@ -1662,26 +2361,25 @@ class MainWindow(QMainWindow):
         results_layout.addWidget(graph_settings_group)
 
         self.table = ResultsTable(0, 16)
-        self.table.setHorizontalHeaderLabels(
-            [
-                "ケース",
-                "時刻数",
-                "最大体積",
-                "最終体積",
-                "蒸発完了時刻",
-                "初期接触角",
-                "最終有効接触角",
-                "平均接触角",
-                "初期接触半径",
-                "最終有効接触半径",
-                "推定alpha_e",
-                "fit RMSE",
-                "fit R^2",
-                "fit状態",
-                "状態",
-                "エラー",
-            ]
-        )
+        self.table_header_sources = [
+            "ケース",
+            "時刻数",
+            "最大体積",
+            "最終体積",
+            "蒸発完了時刻",
+            "初期接触角",
+            "最終有効接触角",
+            "平均接触角",
+            "初期接触半径",
+            "最終有効接触半径",
+            "推定alpha_e",
+            "fit RMSE",
+            "fit R^2",
+            "fit状態",
+            "状態",
+            "エラー",
+        ]
+        self.table.setHorizontalHeaderLabels(self.table_header_sources)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setSectionsClickable(True)
@@ -1768,7 +2466,7 @@ class MainWindow(QMainWindow):
 
         visual_options_row = QHBoxLayout()
         self.visual_mode_combo = QComboBox()
-        self.visual_mode_combo.addItems(["2D診断", "3D概観"])
+        _combo_set_items(self.visual_mode_combo, [("2D診断", "2d"), ("3D概観", "3d")], self.language)
         self.visual_projection_combo = QComboBox()
         self.visual_projection_combo.addItems(["xz", "yz", "xy"])
         self.visual_periodic_check = QCheckBox("粒子周期表示")
@@ -1874,7 +2572,8 @@ class MainWindow(QMainWindow):
             spin.setKeyboardTracking(False)
 
     def _connect_signals(self) -> None:
-        self.source_combo.currentTextChanged.connect(self._set_source_mode)
+        self.language_combo.currentIndexChanged.connect(lambda _: self.apply_language(_combo_data(self.language_combo, "ja")))
+        self.source_combo.currentIndexChanged.connect(lambda _: self._set_source_mode(_combo_data(self.source_combo, "local")))
         self.browse_button.clicked.connect(self.choose_folder)
         self.refresh_button.clicked.connect(self.refresh_source)
         self.key_browse_button.clicked.connect(self.choose_private_key)
@@ -1971,6 +2670,85 @@ class MainWindow(QMainWindow):
         self.load_graph_settings_from_current_plot()
         self.refresh_theory_outputs()
 
+    def t(self, text: str) -> str:
+        return _tr(text, self.language)
+
+    def apply_language(self, language: str) -> None:
+        if language not in LANGUAGES:
+            language = "ja"
+        self.language = language
+        language_index = self.language_combo.findData(language)
+        if language_index >= 0 and self.language_combo.currentIndex() != language_index:
+            self.language_combo.blockSignals(True)
+            self.language_combo.setCurrentIndex(language_index)
+            self.language_combo.blockSignals(False)
+        self.setWindowTitle(self.t("mdFOAM 密度解析アプリ"))
+        self._translate_static_widgets(self)
+        _combo_set_items(self.source_combo, [("ローカル", "local"), ("SSH", "ssh")], self.language)
+        _combo_set_items(self.theory_v0_source_combo, [("最大体積", "max_volume"), ("先頭時刻体積", "first_volume")], self.language)
+        _combo_set_items(self.theory_theta_source_combo, [("平均接触角", "average"), ("固定theta", "fixed")], self.language)
+        _combo_set_items(self.graph_aspect_combo, [("自動", "auto"), ("等倍", "equal")], self.language)
+        _combo_set_items(self.graph_axis_mode_combo, [("自動固定", "auto_fixed"), ("手動固定", "manual_fixed")], self.language)
+        _combo_set_items(self.visual_mode_combo, [("2D診断", "2d"), ("3D概観", "3d")], self.language)
+        self._set_quality_combo_items(self.graph_quality_combo)
+        self.table.setHorizontalHeaderLabels([self.t(header) for header in self.table_header_sources])
+        self._translate_tabs(self.workflow_tabs)
+        self._translate_tabs(self.tabs)
+        self.load_graph_settings_from_current_plot()
+        self.update_visual_controls()
+        self.refresh_current_result_tab()
+
+    def _set_quality_combo_items(self, combo: QComboBox) -> None:
+        current_dpi = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        for label, dpi in QUALITY_DPI_OPTIONS.items():
+            combo.addItem(self.t(label), dpi)
+        index = combo.findData(current_dpi if current_dpi is not None else QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
+        combo.setCurrentIndex(index if index >= 0 else 1)
+        combo.blockSignals(False)
+
+    def _translate_static_widgets(self, root: QWidget) -> None:
+        source_keys = set()
+        for translations in TRANSLATIONS.values():
+            source_keys.update(translations.keys())
+        widgets = [
+            *root.findChildren(QLabel),
+            *root.findChildren(QPushButton),
+            *root.findChildren(QCheckBox),
+            *root.findChildren(QGroupBox),
+        ]
+        for widget in widgets:
+            if isinstance(widget, QLabel):
+                text = widget.text()
+            else:
+                text = widget.title() if isinstance(widget, QGroupBox) else widget.text()
+            source = widget.property("i18n_source_text")
+            if source is None and text in source_keys:
+                source = text
+                widget.setProperty("i18n_source_text", source)
+            if not source:
+                continue
+            translated = self.t(str(source))
+            if isinstance(widget, QGroupBox):
+                widget.setTitle(translated)
+            else:
+                widget.setText(translated)
+
+    def _translate_tabs(self, tabs: QTabWidget) -> None:
+        source_keys = set()
+        for translations in TRANSLATIONS.values():
+            source_keys.update(translations.keys())
+        for index in range(tabs.count()):
+            source = tabs.tabBar().tabData(index)
+            if source is None:
+                text = tabs.tabText(index)
+                if text not in source_keys:
+                    continue
+                source = text
+                tabs.tabBar().setTabData(index, source)
+            tabs.setTabText(index, self.t(str(source)))
+
     @Slot(int)
     def select_table_column(self, column: int) -> None:
         self.table.clearSelection()
@@ -2010,9 +2788,8 @@ class MainWindow(QMainWindow):
         self._auto_axis_ranges.clear()
         self.table.setRowCount(0)
 
-    @Slot(str)
     def _set_source_mode(self, mode: str) -> None:
-        is_remote = mode == "SSH"
+        is_remote = mode == "ssh"
         self.source_stack.setCurrentIndex(1 if is_remote else 0)
         if is_remote:
             self.folder_edit.setText(self.remote_path_edit.text())
@@ -2020,7 +2797,7 @@ class MainWindow(QMainWindow):
                 self._clear_loaded_cases()
         else:
             self.folder_edit.setText(str(self.local_folder_path))
-            if self.loaded_source not in ("", "ローカル"):
+            if self.loaded_source not in ("", "local"):
                 self.load_folder(self.local_folder_path)
 
     def _clear_loaded_cases(self) -> None:
@@ -2094,7 +2871,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def refresh_source(self) -> None:
-        if self.source_combo.currentText() == "SSH":
+        if _combo_data(self.source_combo, "local") == "ssh":
             self.connect_remote_browser()
         else:
             self.load_folder(self.local_folder_path)
@@ -2190,7 +2967,7 @@ class MainWindow(QMainWindow):
         self._clear_results()
         self.update_visual_controls(None)
         self.remote_cases = []
-        self.loaded_source = "ローカル"
+        self.loaded_source = "local"
         try:
             self.cases = discover_cases(path)
             fields = discover_fields_for_cases(self.cases)
@@ -2242,7 +3019,7 @@ class MainWindow(QMainWindow):
         self.log(f"密度フィールド: {', '.join(fields)}")
 
     def selected_cases(self) -> list[Path] | list[str]:
-        if self.source_combo.currentText() == "SSH":
+        if _combo_data(self.source_combo, "local") == "ssh":
             remote_cases: list[str] = []
             for index in range(self.case_list.count()):
                 item = self.case_list.item(index)
@@ -2274,8 +3051,8 @@ class MainWindow(QMainWindow):
         )
 
     def theory_settings(self) -> TheorySettings:
-        v0_source = "first_volume" if self.theory_v0_source_combo.currentText() == "先頭時刻体積" else "max_volume"
-        theta_source = "fixed" if self.theory_theta_source_combo.currentText() == "固定theta" else "average"
+        v0_source = _combo_data(self.theory_v0_source_combo, "max_volume")
+        theta_source = _combo_data(self.theory_theta_source_combo, "average")
         return TheorySettings(
             rho_v=self.theory_rho_v_spin.value(),
             rho_l=self.theory_rho_l_spin.value(),
@@ -2312,7 +3089,7 @@ class MainWindow(QMainWindow):
         self.refresh_theory_outputs()
 
     def update_theory_control_state(self) -> None:
-        self.theory_fixed_theta_spin.setEnabled(self.theory_theta_source_combo.currentText() == "固定theta")
+        self.theory_fixed_theta_spin.setEnabled(_combo_data(self.theory_theta_source_combo, "average") == "fixed")
 
     def update_theory_diagnostics(self, result: CaseResult | None = None) -> None:
         result = result or self.current_result()
@@ -2366,7 +3143,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "ケースなし", "少なくとも1つのケースを選択してください。")
             return
         remote_profile = None
-        if self.source_combo.currentText() == "SSH":
+        if _combo_data(self.source_combo, "local") == "ssh":
             try:
                 remote_profile = self._remote_profile()
                 self._save_ssh_profile()
@@ -2429,13 +3206,13 @@ class MainWindow(QMainWindow):
         self.graph_axis_target_combo.blockSignals(True)
         self.graph_axis_target_combo.clear()
         if is_theory_tab:
-            self.graph_axis_target_combo.addItem("蒸発量 EM", "theory_evaporated_mass")
-            self.graph_axis_target_combo.addItem("理論/MD 等価半径", "theory_equivalent_radius")
+            self.graph_axis_target_combo.addItem(self.t("蒸発量 EM"), "theory_evaporated_mass")
+            self.graph_axis_target_combo.addItem(self.t("理論/MD 等価半径"), "theory_equivalent_radius")
             index = self.graph_axis_target_combo.findData(current_target)
             self.graph_axis_target_combo.setCurrentIndex(index if index >= 0 else 0)
             self.graph_axis_target_combo.setEnabled(True)
         else:
-            self.graph_axis_target_combo.addItem("現在グラフ", "")
+            self.graph_axis_target_combo.addItem(self.t("現在グラフ"), "")
             self.graph_axis_target_combo.setEnabled(False)
         self.graph_axis_target_combo.blockSignals(False)
         plot = self.current_plot_widget()
@@ -2472,12 +3249,14 @@ class MainWindow(QMainWindow):
             self.graph_alpha_spin.setValue(settings.point_alpha)
             self.graph_font_size_spin.setValue(settings.font_size)
             self.graph_marker_combo.setCurrentText(settings.marker)
-            self.graph_aspect_combo.setCurrentText(settings.aspect)
+            aspect_index = self.graph_aspect_combo.findData(settings.aspect)
+            self.graph_aspect_combo.setCurrentIndex(aspect_index if aspect_index >= 0 else 0)
             self.graph_title_check.setChecked(settings.title_visible)
             self.graph_axis_label_check.setChecked(settings.axis_labels_visible)
             self.graph_tick_label_check.setChecked(settings.tick_labels_visible)
             self.graph_grid_check.setChecked(settings.grid_visible)
-            self.graph_axis_mode_combo.setCurrentText("手動固定" if settings.axis_mode == "manual_fixed" else "自動固定")
+            axis_mode_index = self.graph_axis_mode_combo.findData(settings.axis_mode)
+            self.graph_axis_mode_combo.setCurrentIndex(axis_mode_index if axis_mode_index >= 0 else 0)
             self.graph_x_min_spin.setValue(settings.x_min)
             self.graph_x_max_spin.setValue(settings.x_max)
             self.graph_y_min_spin.setValue(settings.y_min)
@@ -2486,7 +3265,8 @@ class MainWindow(QMainWindow):
             self.graph_y_log_check.setChecked(settings.y_log)
             self.graph_width_spin.setValue(settings.image_width)
             self.graph_height_spin.setValue(settings.image_height)
-            self.graph_quality_combo.setCurrentText(_quality_label_for_dpi(settings.dpi))
+            quality_index = self.graph_quality_combo.findData(settings.dpi)
+            self.graph_quality_combo.setCurrentIndex(quality_index if quality_index >= 0 else 1)
             self.graph_transparent_check.setChecked(settings.transparent)
         for widget in (
             self.graph_color_button,
@@ -2523,12 +3303,12 @@ class MainWindow(QMainWindow):
         settings.point_alpha = self.graph_alpha_spin.value()
         settings.font_size = self.graph_font_size_spin.value()
         settings.marker = self.graph_marker_combo.currentText()
-        settings.aspect = self.graph_aspect_combo.currentText()
+        settings.aspect = _combo_data(self.graph_aspect_combo, "auto")
         settings.title_visible = self.graph_title_check.isChecked()
         settings.axis_labels_visible = self.graph_axis_label_check.isChecked()
         settings.tick_labels_visible = self.graph_tick_label_check.isChecked()
         settings.grid_visible = self.graph_grid_check.isChecked()
-        settings.axis_mode = "manual_fixed" if self.graph_axis_mode_combo.currentText() == "手動固定" else "auto_fixed"
+        settings.axis_mode = _combo_data(self.graph_axis_mode_combo, "auto_fixed")
         settings.axis_auto = settings.axis_mode != "manual_fixed"
         settings.x_min = self.graph_x_min_spin.value()
         settings.x_max = self.graph_x_max_spin.value()
@@ -2538,7 +3318,7 @@ class MainWindow(QMainWindow):
         settings.y_log = self.graph_y_log_check.isChecked()
         settings.image_width = self.graph_width_spin.value()
         settings.image_height = self.graph_height_spin.value()
-        settings.dpi = QUALITY_DPI_OPTIONS.get(self.graph_quality_combo.currentText(), QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
+        settings.dpi = int(self.graph_quality_combo.currentData() or QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
         settings.transparent = self.graph_transparent_check.isChecked()
         self.update_axis_spin_enabled()
         kind = self._current_graph_kind()
@@ -2551,7 +3331,7 @@ class MainWindow(QMainWindow):
         plot_kind = plot._last_plot[0] if plot is not None and plot._last_plot is not None else "xy"
         has_plot = plot is not None
         x_axis_available = has_plot and plot_kind in ("xy", "series")
-        manual_axis = has_plot and self.graph_axis_mode_combo.currentText() == "手動固定"
+        manual_axis = has_plot and _combo_data(self.graph_axis_mode_combo, "auto_fixed") == "manual_fixed"
         self.graph_x_min_spin.setEnabled(manual_axis and x_axis_available)
         self.graph_x_max_spin.setEnabled(manual_axis and x_axis_available)
         self.graph_y_min_spin.setEnabled(manual_axis)
@@ -2873,17 +3653,17 @@ class MainWindow(QMainWindow):
     def update_visual_controls(self, result: CaseResult | None = None) -> None:
         result = result or self.current_result()
         if result is None or not result.rows:
-            self.visual_case_label.setText("ケース: -")
-            self.visual_time_label.setText("時刻: -")
-            self.visual_range_label.setText("GIF範囲: -")
+            self.visual_case_label.setText(self.t("ケース: -"))
+            self.visual_time_label.setText(self.t("時刻: -"))
+            self.visual_range_label.setText(self.t("GIF範囲: -"))
             self.visual_time_slider.setEnabled(False)
             self.visual_range_start_slider.setEnabled(False)
             self.visual_range_end_slider.setEnabled(False)
-            self.visual_plot.clear()
+            self.visual_plot.clear(self.t("可視化するケースと時刻を選択してください"))
             return
 
         count = len(result.rows)
-        self.visual_case_label.setText(f"ケース: {result.case_name}")
+        self.visual_case_label.setText(f"{self.t('ケース')}: {result.case_name}")
         for slider in (self.visual_time_slider, self.visual_range_start_slider, self.visual_range_end_slider):
             slider.blockSignals(True)
             slider.setRange(0, count - 1)
@@ -2914,11 +3694,11 @@ class MainWindow(QMainWindow):
     def update_visual_range_label(self) -> None:
         result = self.current_result()
         if result is None or not result.rows:
-            self.visual_range_label.setText("GIF範囲: -")
+            self.visual_range_label.setText(self.t("GIF範囲: -"))
             return
         start, end = self._visual_range_indices()
         self.visual_range_label.setText(
-            f"GIF範囲: {result.rows[start].time:.4g} - {result.rows[end].time:.4g}"
+            f"{self.t('GIF範囲')}: {result.rows[start].time:.4g} - {result.rows[end].time:.4g}"
         )
 
     def refresh_visualization(self) -> None:
@@ -2928,7 +3708,7 @@ class MainWindow(QMainWindow):
         self._apply_visual_defaults()
         index = max(0, min(self.visual_time_slider.value(), len(result.rows) - 1))
         row = result.rows[index]
-        self.visual_time_label.setText(f"時刻: {row.time:.8g}")
+        self.visual_time_label.setText(f"{self.t('時刻')}: {row.time:.8g}")
         try:
             frame = self._load_visual_frame(result, row.time)
             self._draw_visual_frame(frame)
@@ -2937,7 +3717,7 @@ class MainWindow(QMainWindow):
             self.log(f"可視化データを読み込めません: {exc}")
 
     def _apply_visual_defaults(self) -> None:
-        if self.visual_mode_combo.currentText().startswith("3D") and self.visual_periodic_check.isChecked():
+        if _combo_data(self.visual_mode_combo, "2d") == "3d" and self.visual_periodic_check.isChecked():
             if self.visual_max_points_spin.value() == 0:
                 self.visual_max_points_spin.blockSignals(True)
                 self.visual_max_points_spin.setSpecialValueText(f"自動({THREE_D_AUTO_MAX_POINTS})")
@@ -2946,7 +3726,7 @@ class MainWindow(QMainWindow):
     def _draw_visual_frame(self, frame: VisualizationFrame) -> None:
         downsample = self.visual_plot.draw_frame(
             frame,
-            self.visual_mode_combo.currentText(),
+            _combo_data(self.visual_mode_combo, "2d"),
             self.visual_projection_combo.currentText(),
             self.visual_periodic_check.isChecked(),
             self.visual_tile_spin.value(),
@@ -3105,9 +3885,9 @@ class MainWindow(QMainWindow):
 
     def _theory_png_options(self, result: CaseResult | None = None) -> list[tuple[str, PlotWidget | list[PlotWidget], str]]:
         return [
-            ("蒸発量 EM", self.theory_em_plot, self._suggested_png_filename("theory_evaporated_mass", result)),
-            ("理論/MD 等価半径", self.theory_radius_plot, self._suggested_png_filename("theory_equivalent_radius", result)),
-            ("上下2枚", [self.theory_em_plot, self.theory_radius_plot], self._suggested_png_filename("theory_combined", result)),
+            (self.t("蒸発量 EM"), self.theory_em_plot, self._suggested_png_filename("theory_evaporated_mass", result)),
+            (self.t("理論/MD 等価半径"), self.theory_radius_plot, self._suggested_png_filename("theory_equivalent_radius", result)),
+            (self.t("上下2枚"), [self.theory_em_plot, self.theory_radius_plot], self._suggested_png_filename("theory_combined", result)),
         ]
 
     def _suggested_png_filename(self, kind: str, result: CaseResult | None) -> str:
@@ -3132,18 +3912,18 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         row = QHBoxLayout()
         path_edit = QLineEdit(str(Path(self._local_dialog_start_dir()) / suggested_name))
-        browse_button = QPushButton("参照")
+        browse_button = QPushButton(self.t("参照"))
         row.addWidget(path_edit, 1)
         row.addWidget(browse_button)
-        layout.addWidget(QLabel("保存先フォルダ"))
+        layout.addWidget(QLabel(self.t("保存先フォルダ")))
         layout.addLayout(row)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("OK")
-        buttons.button(QDialogButtonBox.Cancel).setText("キャンセル")
+        buttons.button(QDialogButtonBox.Cancel).setText(self.t("キャンセル"))
         layout.addWidget(buttons)
 
         def browse() -> None:
-            directory = QFileDialog.getExistingDirectory(dialog, "親フォルダを選択", self._local_dialog_start_dir())
+            directory = QFileDialog.getExistingDirectory(dialog, self.t("親フォルダを選択"), self._local_dialog_start_dir())
             if directory:
                 path_edit.setText(str(Path(directory) / suggested_name))
 
@@ -3159,17 +3939,17 @@ class MainWindow(QMainWindow):
 
     def _selected_theory_bulk_kind(self) -> str | None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("保存する理論グラフ")
+        dialog.setWindowTitle(self.t("保存する理論グラフ"))
         layout = QVBoxLayout(dialog)
         combo = QComboBox()
-        combo.addItem("蒸発量 EM", "theory_evaporated_mass")
-        combo.addItem("理論/MD 等価半径", "theory_equivalent_radius")
-        combo.addItem("上下2枚", "theory_combined")
-        layout.addWidget(QLabel("全ケースPNG出力するグラフを選択してください。"))
+        combo.addItem(self.t("蒸発量 EM"), "theory_evaporated_mass")
+        combo.addItem(self.t("理論/MD 等価半径"), "theory_equivalent_radius")
+        combo.addItem(self.t("上下2枚"), "theory_combined")
+        layout.addWidget(QLabel(self.t("全ケースPNG出力するグラフを選択してください。")))
         layout.addWidget(combo)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("OK")
-        buttons.button(QDialogButtonBox.Cancel).setText("キャンセル")
+        buttons.button(QDialogButtonBox.Cancel).setText(self.t("キャンセル"))
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
