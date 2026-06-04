@@ -1,9 +1,13 @@
 # mdFOAM Density Analyzer
 
 [![CI](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Kaito-Rowing/mdfoam-density-analyzer?sort=semver)](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 mdFOAM/OpenFOAM形式の計算結果をPythonで直接読み取り、密度しきい値以上の液滴領域について体積、等価半径、蒸発完了時刻、接触角、接触半径を確認するデスクトップアプリです。
 Reproducible batch droplet analysis for mdFOAM/OpenFOAM-style molecular simulation outputs, directly in Python without requiring ParaView or pvpython.
+
+Quick links: [Latest release](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/releases/latest) · [Changelog](CHANGELOG.md) · [License](LICENSE) · [CI](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml)
 
 ## Why This Exists
 
@@ -221,4 +225,4 @@ Please avoid committing large simulation outputs, generated case directories, or
 
 ## License
 
-This project is licensed under the MIT License. See `LICENSE`.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
