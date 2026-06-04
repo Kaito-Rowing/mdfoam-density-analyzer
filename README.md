@@ -1,48 +1,72 @@
 # mdFOAM Density Analyzer
 
-mdFOAM/OpenFOAM形式の計算結果をPythonで直接読み取り、密度しきい値以上の液滴領域について体積、等価半径、蒸発完了時刻、接触角、接触半径を確認するデスクトップアプリです。
+Reproducible batch droplet analysis for mdFOAM/OpenFOAM-style molecular simulation outputs, directly in Python without requiring ParaView or pvpython.
 
-ParaView と pvpython は使いません。
+## Why This Exists
 
-## セットアップ
+mdFOAM users often need quantitative post-processing that can be repeated across many related simulation cases. Manual visualization workflows are useful for inspection, but they can be difficult to reproduce exactly when the goal is to compare droplet volume, radius, contact angle, contact radius, and evaporation time across tens or roughly 100 cases.
+
+This project is a desktop application for that narrower research workflow. It reads OpenFOAM ASCII fields and `constant/polyMesh` files directly, computes droplet metrics from density fields, and exports tabular and graphical results for downstream analysis.
+
+## Why mdFOAM Users May Want This Instead of a ParaView-Centered Workflow
+
+ParaView is a general-purpose scientific visualization tool and is widely used in OpenFOAM workflows. This project is not a replacement for ParaView's visualization capabilities.
+
+mdFOAM Density Analyzer is intended for a different task: reproducible, batch-oriented quantitative droplet analysis from mdFOAM/OpenFOAM-style molecular simulation outputs. The application avoids a ParaView/pvpython runtime dependency and instead parses the OpenFOAM ASCII data directly in Python. This makes it easier to run the same analysis settings over many cases, export comparable CSV files, and preserve a repeatable post-processing path.
+
+The contact angle workflow is designed to approximate a previous process where contour points were extracted in ParaView and then processed with `Sesshoku6.py`. Here, density-threshold contour points are reconstructed directly from neighboring cell centers in Python, then the same sphere-fit style calculation is applied.
+
+## Key Features
+
+- Directly reads OpenFOAM ASCII `volScalarField` density fields.
+- Computes cell volumes and cell centers from `constant/polyMesh/points`, `faces`, `owner`, and `neighbour`.
+- Supports density fields named like `rhoM_*` and `rhoN_*`, with `rhoM_water` as the default.
+- Computes droplet volume above a density threshold.
+- Computes equivalent radius: `R_eq = (3V / (4*pi))^(1/3)`.
+- Computes contact angle, contact radius, and contact fit point count.
+- Computes evaporation completion time from consecutive zero-volume time steps.
+- Handles a single case or many cases under a parent directory.
+- Supports SSH/SFTP workflows for remote HPC results without running commands on the remote host.
+- Exports summary CSV, time-series CSV, graph PNG files, visualization PNG files, and visualization GIF files.
+- Provides a PySide6 desktop GUI with case tables, plots, and visualization diagnostics.
+
+## Installation
+
+Use Python 3.10 or newer if possible.
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-Windowsで `app.py` の右クリック起動が別のPythonを使って失敗する場合は、依存関係が入っているPythonで `requirements.txt` を入れてください。
+The main dependencies are PySide6, matplotlib, NumPy, Paramiko, and keyring.
 
-## 起動
+## Quick Start
 
-この環境では次のバッチファイル起動を推奨します。
-
-```powershell
-.\run_app.bat
-```
-
-または、依存関係を入れたPythonを明示して起動します。
+Start the application:
 
 ```powershell
 python app.py
 ```
 
-起動後、GUIの「入力」タブでローカルまたはSSHを選び、解析対象ケースを含むフォルダを選択してください。
+On Windows, this repository also includes a launcher:
 
-## SSH/SFTPでリモートケースを解析する
+```powershell
+.\run_app.bat
+```
 
-「入力」タブで入力元を `SSH` に切り替えると、SSH接続先のケースをSFTPで読み込み、解析に必要なOpenFOAM ASCIIファイルだけをローカルキャッシュへ同期してから解析します。リモート側でコマンドは実行しません。
+In the GUI:
 
-- PuTTYの `.ppk` は直接読み込めません。PuTTYgenでOpenSSH形式の秘密鍵へ変換してから「秘密鍵」に指定してください。
-- パスフレーズ/パスワードは、保存チェックを入れた場合だけOSの資格情報ストアに保存します。保存に失敗した場合はログに表示し、その回だけ入力値を使います。
-- 「接続/更新」でSSH接続とケース検出を行います。リモートフォルダ一覧は「上へ」「開く」「このフォルダを選択」で移動できます。
-- 解析条件は「解析設定」タブ、結果表とグラフ、CSV/PNG出力は「結果」タブにあります。
-- 同期キャッシュはユーザーキャッシュディレクトリに保存され、リモートファイルのサイズと更新時刻が同じ場合は再利用されます。「キャッシュ削除」で削除できます。
+1. Choose a local folder or switch the input source to SSH.
+2. Select a case folder or a parent folder containing multiple cases.
+3. Choose the density field, usually `rhoM_water`.
+4. Set the density threshold and analysis parameters.
+5. Run the analysis.
+6. Review the result table, time-series plots, evaporation-time plot, and visualization tab.
+7. Export CSV, PNG, or GIF outputs as needed.
 
-## 入力データ
+## Expected Input Structure
 
-大きな計算結果やケースデータはリポジトリに含めない方針です。ローカル検証用にケースを置く場合も、Git管理対象にはしないでください。
-
-アプリは以下のどちらかの構造を想定しています。
+For multiple cases, select a parent directory like this:
 
 ```text
 parent/
@@ -54,10 +78,13 @@ parent/
         ...
   case002/
     main/
-      ...
+      constant/polyMesh/
+      <time>/
+        rhoM_water
+        ...
 ```
 
-または単一ケース:
+For a single case, select the case directory itself:
 
 ```text
 case001/
@@ -68,61 +95,116 @@ case001/
       ...
 ```
 
-再構成済みフィールド `main/<time>/<field>` を優先して読みます。存在しない場合は `main/processor*/<time>/<field>` を合算します。
+Case detection follows the current application behavior:
 
-## 解析内容
+- If the selected folder itself contains `main/`, it is treated as a single case.
+- If child folders under the selected folder contain `main/`, they are treated as multiple cases.
+- Reconstructed time directories such as `main/<time>/<density field>` are preferred.
+- If reconstructed fields are not present, the analyzer can read `main/processor*/<time>/<density field>` and aggregate processor results.
+- Numeric time directories are analyzed only when the selected density field is present.
 
-- 密度しきい値以上のセル体積合計
-- 等価半径 `R_eq = (3V / (4*pi))^(1/3)`
-- 蒸発完了時刻
-- 接触角
-- 接触半径
-- ケースごとの結果表
-- 体積、等価半径、接触角、接触半径の時系列グラフ
-- 全ケースの蒸発完了時刻グラフ
-- CSV/PNG出力
+Large simulation outputs and local case directories should stay outside Git. This repository intentionally does not include sample mdFOAM/OpenFOAM case data.
 
-接触角と接触半径は、選択中の密度フィールドでしきい値をまたぐ隣接セル中心間を線形補間して等値面点群を作り、その点群に `Sesshoku6.py` と同じ球フィット式を適用して計算します。これは、従来の「ParaViewでContourを取ったあとに `Sesshoku6.py` を適用する」手順に近づけるための処理です。xy方向の周期境界をまたぐ液滴に対応するため、既定では球フィット前にxy座標を周期補正します。
+## Analysis Methods
 
-平均接触角は、ケース内の時系列先頭から指定した割合までを対象にし、その範囲内で有効な接触角だけを算術平均します。蒸発後半のfit点不足によるばらつきを避けたい場合は、GUIの「平均接触角の対象範囲」を小さくしてください。
+The default density field is `rhoM_water`, and the default density threshold is `500`.
 
-## 既定の解析条件
+Volume is computed by summing the volumes of cells whose density is greater than or equal to the threshold. Cell volumes and centers are computed from OpenFOAM `polyMesh` files when possible. The analyzer does not assume a constant cell volume.
 
-- 密度フィールド: `rhoM_water`
-- 密度しきい値: `500`
-- 0判定許容値: `0`
-- 連続ゼロ数: `3`
-- 蒸発完了時刻: 連続ゼロ区間の最初の時刻
-- 接触角fit下限: `0.5`
-- 接触角fit上限: `1.0`
-- 平均接触角の対象範囲: `100%`
-- xy周期補正: 有効
+If mesh-derived volume information is unavailable, the GUI allows fallback input of a cell volume or `dx`, `dy`, and `dz`. In that fallback mode, cell centers are not available, so contact angle and contact radius are left blank.
 
-セル体積とセル中心はOpenFOAM ASCIIの `constant/polyMesh/points`, `faces`, `owner`, `neighbour` から計算します。体積を計算できない場合はGUIでセル体積または `dx, dy, dz` を入力できますが、その場合は接触角・接触半径は空欄になります。
+Evaporation completion time is reported as the first time in a consecutive zero-volume sequence. For example, if the consecutive-zero setting is `3` and the first three zero-equivalent rows occur at `1.19e-08`, `1.20e-08`, and `1.21e-08`, the evaporation time is `1.19e-08`.
 
-## CSV出力
+Contact angle and contact radius are calculated from density-threshold contour points:
 
-`CSV出力` では以下を保存します。
+- The analyzer finds neighboring cell-center pairs that cross the selected density threshold.
+- It linearly interpolates those pairs to generate an isosurface-like point cloud.
+- It selects fit points within the configured vertical fit range.
+- It fits a sphere using the equation `x^2 + y^2 + z^2 + Dx + Ey + Fz + G = 0`.
+- It computes contact angle as `acos((z_base - zc) / R)` in degrees.
+- It computes contact radius as `R * sin(theta)`.
+- XY periodic unwrapping is enabled by default and uses the mesh x/y bounds to estimate periodic lengths.
 
-- `mdfoam_summary.csv`: ケースごとの最大体積、最終体積、蒸発完了時刻、初期/最終有効/平均の接触角、初期/最終有効の接触半径
-- `mdfoam_timeseries.csv`: 時刻ごとの体積、等価半径、選択セル数、接触角、接触半径、接触角fit点数
+This method is intended to approximate the older contour-points-plus-`Sesshoku6.py` workflow while keeping the full post-processing path inside Python.
 
-## 可視化
+## SSH/SFTP Remote Case Workflow
 
-「結果」タブ内の「可視化」では、選択ケースの各時刻について以下を確認できます。
+The SSH mode is designed for remote HPC results when you want to analyze case outputs locally without running post-processing commands on the remote machine.
 
-- `lagrangian/moleculeCloud/positions` の粒子点群
-- `lagrangian/moleculeCloud/id` によるID色分け
-- 密度しきい値以上のセル中心
-- 接触角fitに使った点、球fit、基板高さ、接触半径
-- 2D診断表示と3D概観表示
-- 粒子だけを対象にしたxy周期複製表示
-- 3D周期表示時の自動間引きと固定表示範囲
-- タイトル、軸ラベル、軸目盛、情報テキスト、凡例、グリッドの表示切替
-- PNG保存とGIF保存
+Current behavior:
 
-GIF保存範囲は可視化タブ内の開始/終了スライダーで指定できます。SSHケースでは、可視化に必要な `positions` と `id` を表示時に追加でキャッシュへ同期します。
+- Connects through SSH and reads files over SFTP.
+- Discovers case folders and density fields on the remote filesystem.
+- Downloads only the OpenFOAM ASCII files needed for the selected analysis.
+- Caches downloaded files locally and reuses them when size and modification time match.
+- Does not execute commands on the remote host.
+- Supports OpenSSH-format private keys. PuTTY `.ppk` files should be converted to OpenSSH format first.
+- Downloads `lagrangian/moleculeCloud/positions` and `id` on demand when visualization needs those files.
 
-## リポジトリメモ
+## Outputs
 
-このアプリの前提や実装上の注意は `AGENTS.md` にまとめています。
+CSV export writes two files:
+
+- `mdfoam_summary.csv`: one row per case, including maximum volume, final volume, evaporation time, initial/final valid contact angle, average contact angle, and initial/final valid contact radius.
+- `mdfoam_timeseries.csv`: one row per case and time, including time, volume, equivalent radius, selected cell count, total cell count, contact angle, contact radius, and contact fit point count.
+
+PNG export supports the analysis graphs in the results tab. The visualization tab can export the current visual frame as PNG.
+
+GIF export is available from the visualization tab and uses the selected time range and FPS setting.
+
+## Visualization
+
+The application includes plotting and diagnostic views for checking results:
+
+- Volume versus time.
+- Equivalent radius versus time.
+- Contact angle versus time.
+- Contact radius versus time.
+- Evaporation completion time across all analyzed cases.
+- 2D contact-fit diagnostics.
+- 3D overview visualization.
+- Optional particle visualization from `lagrangian/moleculeCloud/positions` and `id` when those files are available.
+
+The time-series plots are shown as point plots rather than connected line plots.
+
+## Limitations
+
+- The GUI labels are currently Japanese.
+- The parser targets OpenFOAM ASCII-style files, not binary OpenFOAM fields.
+- Density fields are treated as cell-centered scalar data.
+- Contact angle and contact radius require mesh-derived cell centers.
+- Contact metrics may be blank when too few valid contour or fit points are available.
+- The analysis is designed around mdFOAM/OpenFOAM-style droplet workflows and is intentionally niche.
+- No large sample simulation data is included in this repository.
+
+## Roadmap
+
+Potential future improvements:
+
+- Performance validation on parent directories containing roughly 100 cases.
+- Analysis result caching.
+- Case-name parameter extraction for tables and plot axes.
+- Reloading previously exported time-series CSV files for plotting.
+- Comparing multiple density thresholds.
+- Unit switching for volume and radius.
+- Filtering result tables to error cases.
+- Overlaying multiple selected cases in a single graph.
+- In-GUI cross-section views for contact-angle fitting.
+
+## Contributing
+
+Contributions are welcome when they preserve the core design goal: reproducible quantitative post-processing for mdFOAM/OpenFOAM-style outputs without adding a ParaView or pvpython dependency.
+
+Useful contribution areas include:
+
+- More robust OpenFOAM ASCII parsing.
+- Focused tests for mesh, density-field, contact-angle, and remote-cache behavior.
+- Documentation for real mdFOAM workflows.
+- GUI usability improvements.
+- Performance improvements for large case sets.
+
+Please avoid committing large simulation outputs, generated case directories, or local export artifacts.
+
+## License
+
+No license file is currently included in this repository. Add an explicit open-source license before distributing or accepting external contributions.
