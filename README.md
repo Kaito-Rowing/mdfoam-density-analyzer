@@ -1,13 +1,32 @@
+<div align="center">
+
 # mdFOAM Density Analyzer
+
+**Reproducible batch droplet analysis for mdFOAM/OpenFOAM-style molecular simulation outputs.**
 
 [![CI](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Kaito-Rowing/mdfoam-density-analyzer?sort=semver)](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](#installation)
+[![GUI](https://img.shields.io/badge/GUI-PySide6-2f7d32)](#application-preview)
+
+[Latest release](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/releases/latest) ·
+[Changelog](CHANGELOG.md) ·
+[License](LICENSE) ·
+[CI](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml)
+
+</div>
 
 mdFOAM/OpenFOAM形式の計算結果をPythonで直接読み取り、密度しきい値以上の液滴領域について体積、等価半径、蒸発完了時刻、接触角、接触半径を確認するデスクトップアプリです。
-Reproducible batch droplet analysis for mdFOAM/OpenFOAM-style molecular simulation outputs, directly in Python without requiring ParaView or pvpython.
+The analyzer works directly on OpenFOAM ASCII files and does not require ParaView or pvpython.
 
-Quick links: [Latest release](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/releases/latest) · [Changelog](CHANGELOG.md) · [License](LICENSE) · [CI](https://github.com/Kaito-Rowing/mdfoam-density-analyzer/actions/workflows/ci.yml)
+| Focus | What the app does |
+| --- | --- |
+| Batch analysis | Processes one case or many cases under a parent directory. |
+| Droplet metrics | Computes volume, equivalent radius, contact angle, contact radius, and evaporation time. |
+| Direct parsing | Reads OpenFOAM ASCII density fields and `constant/polyMesh` files in Python. |
+| Desktop workflow | Provides a PySide6 GUI with tables, plots, visualization diagnostics, and CSV/PNG/GIF export. |
+| Remote access | Supports SSH/SFTP case discovery and file download without running remote commands. |
 
 ## Why This Exists
 
@@ -73,9 +92,20 @@ In the GUI:
 7. Review the result table, time-series plots, evaporation-time plot, and visualization tab.
 8. Export CSV, PNG, or GIF outputs as needed.
 
+```mermaid
+flowchart LR
+    A["Local folder<br/>or SSH/SFTP"] --> B["Case and field discovery"]
+    B --> C["OpenFOAM ASCII parsing"]
+    C --> D["Droplet metric calculation"]
+    D --> E["Tables and plots"]
+    E --> F["CSV / PNG / GIF export"]
+```
+
 ## Application Preview
 
-![Results tab showing a completed droplet analysis with graph controls, summary table, and volume-time plot](docs/screenshots/results-overview.png)
+<p align="center">
+  <img src="docs/screenshots/results-overview.png" alt="Results tab showing a completed droplet analysis with graph controls, summary table, and volume-time plot" width="100%">
+</p>
 
 The results view combines export controls, graph styling options, a per-case summary table, and point-plot tabs for volume, equivalent radius, contact angle, contact radius, evaporation time, theory comparison, and visualization diagnostics.
 
