@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 This project follows a lightweight changelog format. Version numbers are intended to follow semantic versioning once release artifacts are published.
 
+## [0.1.1] - 2026-06-04
+
+### Added
+
+- UI language selector with Japanese, English, Chinese, Spanish, and Hindi labels.
+- GUI regression coverage for language switching without changing internal settings.
+- README documentation for the supported UI languages.
+
+### Changed
+
+- Graph, source, theory, and visualization mode controls now keep stable internal values independent of the displayed language.
+
 ## [0.1.0] - 2026-06-04
 
 ### Added
