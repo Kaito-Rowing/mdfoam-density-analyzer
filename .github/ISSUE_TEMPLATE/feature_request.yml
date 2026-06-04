@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest an improvement for mdFOAM Density Analyzer
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the research workflow or post-processing task this feature would support.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow need
+      description: What are you trying to do, and why is the current behavior insufficient?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should the application do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Are there workarounds or other approaches?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - OpenFOAM ASCII parsing
+        - Mesh geometry
+        - Contact angle analysis
+        - SSH/SFTP workflow
+        - GUI
+        - CSV/PNG/GIF export
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Example data shape
+      description: Provide a synthetic example, small text fragment, or directory shape if relevant. Do not attach full simulation cases.
+      render: text
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Project constraints
+      options:
+        - label: This request does not require adding ParaView or pvpython as a runtime dependency.
+          required: true
