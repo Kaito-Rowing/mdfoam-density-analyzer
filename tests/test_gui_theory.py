@@ -22,7 +22,13 @@ except ImportError as exc:
     raise unittest.SkipTest(f"PySide6 GUI runtime is unavailable: {exc}") from exc
 
 from mdfoam_analyzer.analysis import CaseResult, TimeResult
-from mdfoam_analyzer.gui import CombinedPlotWidget, GraphPngPreviewDialog, MainWindow, PlotWidget
+from mdfoam_analyzer.gui import (
+    PNG_PREVIEW_PIXELS_PER_INCH,
+    CombinedPlotWidget,
+    GraphPngPreviewDialog,
+    MainWindow,
+    PlotWidget,
+)
 from mdfoam_analyzer.theory import evaporation_flux
 
 
@@ -134,6 +140,31 @@ class GuiTheorySettingsTests(unittest.TestCase):
             self.assertLessEqual(window.width(), 1024)
             self.assertLessEqual(window.height(), 720)
             self.assertTrue(window.workflow_tabs.isVisible())
+        finally:
+            window.close()
+
+    def test_input_and_settings_use_compact_responsive_layout(self) -> None:
+        window = MainWindow()
+        try:
+            window.resize(1400, 900)
+            window.show()
+            self.app.processEvents()
+            self.assertLessEqual(window.input_content.maximumWidth(), 1120)
+            self.assertEqual(window.source_stack.maximumHeight(), 150)
+            self.assertLessEqual(window.threshold_spin.maximumWidth(), 360)
+            self.assertLessEqual(window.theory_rho_l_spin.maximumWidth(), 360)
+            advanced_index = window.settings_grid.indexOf(window.advanced_group)
+            self.assertEqual(window.settings_grid.getItemPosition(advanced_index)[:2], (0, 1))
+
+            window.resize(1024, 720)
+            self.app.processEvents()
+            advanced_index = window.settings_grid.indexOf(window.advanced_group)
+            theory_index = window.settings_grid.indexOf(window.theory_group)
+            self.assertEqual(window.settings_grid.getItemPosition(advanced_index)[:2], (1, 0))
+            self.assertEqual(window.settings_grid.getItemPosition(theory_index)[:2], (3, 0))
+
+            window.source_combo.setCurrentIndex(window.source_combo.findData("ssh"))
+            self.assertGreater(window.source_stack.maximumHeight(), 1000)
         finally:
             window.close()
 
@@ -249,6 +280,25 @@ class GuiTheorySettingsTests(unittest.TestCase):
                 self.assertEqual(dialog.preview_plot._last_plot[1], "first")
                 self.assertEqual(dialog.preview_plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
                 self.assertEqual(dialog.preview_plot.figure.axes[0].get_facecolor()[:3], (1.0, 1.0, 1.0))
+                expected_size = (
+                    round(dialog.width_spin.value() * PNG_PREVIEW_PIXELS_PER_INCH),
+                    round(dialog.height_spin.value() * PNG_PREVIEW_PIXELS_PER_INCH),
+                )
+                self.assertEqual(
+                    (dialog.preview_plot.width(), dialog.preview_plot.height()),
+                    expected_size,
+                )
+                dialog.resize(1400, 900)
+                self.app.processEvents()
+                self.assertEqual(
+                    (dialog.preview_plot.width(), dialog.preview_plot.height()),
+                    expected_size,
+                )
+                dialog.width_spin.setValue(9.0)
+                self.assertEqual(
+                    dialog.preview_plot.width(),
+                    round(9.0 * PNG_PREVIEW_PIXELS_PER_INCH),
+                )
                 dialog.source_combo.setCurrentIndex(1)
                 self.assertEqual(dialog.preview_plot._last_plot[1], "second")
                 dialog.source_combo.setCurrentIndex(2)

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -777,6 +778,7 @@ QUALITY_DPI_OPTIONS = {
     "高 600dpi": 600,
 }
 DEFAULT_QUALITY_LABEL = "標準 300dpi"
+PNG_PREVIEW_PIXELS_PER_INCH = 72
 
 
 def _tr(text: str, language: str = "ja") -> str:
@@ -1354,8 +1356,14 @@ class GraphPngPreviewDialog(QDialog):
         settings_layout = QVBoxLayout(settings_group)
         body.addWidget(settings_group, 0)
         self.preview_stack = QStackedWidget()
+        self.preview_scroll_areas: list[QScrollArea] = []
         for widget in self.preview_widgets:
-            self.preview_stack.addWidget(widget)
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(False)
+            scroll_area.setAlignment(Qt.AlignCenter)
+            scroll_area.setWidget(widget)
+            self.preview_scroll_areas.append(scroll_area)
+            self.preview_stack.addWidget(scroll_area)
         body.addWidget(self.preview_stack, 1)
 
         self.source_combo: QComboBox | None = None
@@ -1452,6 +1460,7 @@ class GraphPngPreviewDialog(QDialog):
 
         self._load_controls_from_preview()
         self._connect_controls()
+        self._update_preview_canvas_size()
         buttons.button(QDialogButtonBox.Save).clicked.connect(self.save_png)
         buttons.rejected.connect(self.reject)
 
@@ -1571,7 +1580,17 @@ class GraphPngPreviewDialog(QDialog):
         settings.transparent = self.transparent_check.isChecked()
         self._update_axis_spin_enabled()
         self.preview_plot.figure.set_size_inches(settings.image_width, settings.image_height, forward=False)
+        self._update_preview_canvas_size()
         self.preview_plot.redraw()
+
+    def _update_preview_canvas_size(self) -> None:
+        settings = self.preview_plot.settings
+        width = max(1, round(settings.image_width * PNG_PREVIEW_PIXELS_PER_INCH))
+        height = max(1, round(settings.image_height * PNG_PREVIEW_PIXELS_PER_INCH))
+        self.preview_plot.figure.set_dpi(PNG_PREVIEW_PIXELS_PER_INCH)
+        self.preview_plot.figure.set_size_inches(settings.image_width, settings.image_height, forward=False)
+        self.preview_plot.canvas.setFixedSize(width, height)
+        self.preview_plot.setFixedSize(width, height)
 
     def _update_axis_spin_enabled(self) -> None:
         plot_kind = self.preview_plot._last_plot[0] if self.preview_plot._last_plot is not None else "xy"
@@ -2194,13 +2213,24 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.workflow_tabs, 1)
 
         input_tab = QWidget()
-        input_layout = QVBoxLayout(input_tab)
+        input_outer_layout = QHBoxLayout(input_tab)
+        input_outer_layout.setContentsMargins(0, 0, 0, 0)
+        input_outer_layout.addStretch(1)
+        self.input_content = QWidget()
+        self.input_content.setMaximumWidth(1120)
+        input_layout = QVBoxLayout(self.input_content)
+        self.input_layout = input_layout
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(12)
+        input_outer_layout.addWidget(self.input_content, 1)
+        input_outer_layout.addStretch(1)
         self.workflow_tabs.addTab(input_tab, "入力")
 
         source_group = QGroupBox("入力元")
         source_layout = QVBoxLayout(source_group)
         source_row = QHBoxLayout()
         self.source_combo = QComboBox()
+        self.source_combo.setMaximumWidth(200)
         _combo_set_items(self.source_combo, [("ローカル", "local"), ("SSH", "ssh")], self.language)
         self.folder_edit = QLabel()
         self.folder_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -2214,7 +2244,7 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(source_group)
 
         self.source_stack = QStackedWidget()
-        input_layout.addWidget(self.source_stack, 2)
+        input_layout.addWidget(self.source_stack)
 
         local_panel = QWidget()
         local_layout = QVBoxLayout(local_panel)
@@ -2225,7 +2255,6 @@ class MainWindow(QMainWindow):
         local_group_layout.addStretch(1)
         local_group_layout.addWidget(self.browse_button)
         local_layout.addWidget(local_group)
-        local_layout.addStretch(1)
         self.source_stack.addWidget(local_panel)
 
         ssh_panel = QWidget()
@@ -2260,6 +2289,16 @@ class MainWindow(QMainWindow):
         ssh_form.addRow("パスフレーズ/パスワード", self.secret_edit)
         ssh_form.addRow("リモートパス", self.remote_path_edit)
         ssh_form.addRow("", self.save_credentials_check)
+        for widget in (
+            self.profile_edit,
+            self.host_edit,
+            self.port_spin,
+            self.username_edit,
+            self.key_path_edit,
+            self.secret_edit,
+            self.remote_path_edit,
+        ):
+            widget.setMaximumWidth(360)
         ssh_splitter.addWidget(self.ssh_group)
 
         browser_group = QGroupBox("リモートフォルダ")
@@ -2291,7 +2330,7 @@ class MainWindow(QMainWindow):
         self.case_list = QListWidget()
         self.case_list.setSelectionMode(QAbstractItemView.SingleSelection)
         case_layout.addWidget(self.case_list, 1)
-        input_layout.addWidget(case_group, 3)
+        input_layout.addWidget(case_group, 1)
 
         settings_tab = QWidget()
         settings_tab_layout = QVBoxLayout(settings_tab)
@@ -2299,13 +2338,23 @@ class MainWindow(QMainWindow):
 
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
-        settings_content = QWidget()
-        settings_content_layout = QVBoxLayout(settings_content)
-        settings_scroll.setWidget(settings_content)
+        settings_canvas = QWidget()
+        settings_canvas_layout = QHBoxLayout(settings_canvas)
+        settings_canvas_layout.setContentsMargins(0, 0, 0, 0)
+        settings_canvas_layout.addStretch(1)
+        self.settings_content = QWidget()
+        self.settings_content.setMaximumWidth(1120)
+        self.settings_grid = QGridLayout(self.settings_content)
+        self.settings_grid.setContentsMargins(0, 0, 0, 0)
+        self.settings_grid.setHorizontalSpacing(14)
+        self.settings_grid.setVerticalSpacing(14)
+        settings_canvas_layout.addWidget(self.settings_content, 1)
+        settings_canvas_layout.addStretch(1)
+        settings_scroll.setWidget(settings_canvas)
         settings_tab_layout.addWidget(settings_scroll, 1)
 
-        basic_group = QGroupBox("基本設定")
-        basic_layout = QFormLayout(basic_group)
+        self.basic_group = QGroupBox("基本設定")
+        basic_layout = QFormLayout(self.basic_group)
         basic_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.field_combo = QComboBox()
         self.field_combo.setMinimumWidth(260)
@@ -2318,10 +2367,10 @@ class MainWindow(QMainWindow):
         basic_layout.addRow("密度しきい値", self.threshold_spin)
         basic_layout.addRow("0判定許容値", self.zero_spin)
         basic_layout.addRow("連続ゼロ数", self.zero_count_spin)
-        settings_content_layout.addWidget(basic_group)
+        self.settings_grid.addWidget(self.basic_group, 0, 0)
 
-        fallback_group = QGroupBox("セル体積 fallback")
-        fallback_layout = QFormLayout(fallback_group)
+        self.fallback_group = QGroupBox("セル体積 fallback")
+        fallback_layout = QFormLayout(self.fallback_group)
         fallback_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.cell_volume_spin = self._scientific_spin(0.0)
         self.dx_spin = self._scientific_spin(0.0)
@@ -2331,10 +2380,10 @@ class MainWindow(QMainWindow):
         fallback_layout.addRow("dx fallback", self.dx_spin)
         fallback_layout.addRow("dy fallback", self.dy_spin)
         fallback_layout.addRow("dz fallback", self.dz_spin)
-        settings_content_layout.addWidget(fallback_group)
+        self.settings_grid.addWidget(self.fallback_group, 1, 0)
 
-        advanced_group = QGroupBox("詳細設定")
-        advanced_layout = QFormLayout(advanced_group)
+        self.advanced_group = QGroupBox("詳細設定")
+        advanced_layout = QFormLayout(self.advanced_group)
         advanced_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.contact_fit_lower_spin = self._fraction_spin(0.5)
         self.contact_fit_upper_spin = self._fraction_spin(1.0)
@@ -2350,10 +2399,10 @@ class MainWindow(QMainWindow):
         advanced_layout.addRow("接触角fit上限", self.contact_fit_upper_spin)
         advanced_layout.addRow("平均接触角の対象範囲", self.contact_average_percent_spin)
         advanced_layout.addRow("xy周期補正", self.contact_unwrap_check)
-        settings_content_layout.addWidget(advanced_group)
+        self.settings_grid.addWidget(self.advanced_group, 0, 1)
 
-        theory_group = QGroupBox("蒸発係数 / 理論比較")
-        theory_layout = QFormLayout(theory_group)
+        self.theory_group = QGroupBox("蒸発係数 / 理論比較")
+        theory_layout = QFormLayout(self.theory_group)
         theory_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         default_theory = THEORY_PRESETS["xlsx準拠"]
         self.theory_preset_combo = QComboBox()
@@ -2405,10 +2454,41 @@ class MainWindow(QMainWindow):
         theory_layout.addRow("fit alpha_e 下限", self.theory_fit_alpha_min_spin)
         theory_layout.addRow("fit alpha_e 上限", self.theory_fit_alpha_max_spin)
         theory_layout.addRow("計算確認", self.theory_diagnostics_label)
-        settings_content_layout.addWidget(theory_group)
-        settings_content_layout.addStretch(1)
+        self.settings_grid.addWidget(self.theory_group, 1, 1)
+        self.settings_grid.setColumnStretch(0, 1)
+        self.settings_grid.setColumnStretch(1, 1)
+        self.settings_grid.setRowStretch(2, 1)
+
+        compact_fields = (
+            self.field_combo,
+            self.threshold_spin,
+            self.zero_spin,
+            self.zero_count_spin,
+            self.cell_volume_spin,
+            self.dx_spin,
+            self.dy_spin,
+            self.dz_spin,
+            self.contact_fit_lower_spin,
+            self.contact_fit_upper_spin,
+            self.contact_average_percent_spin,
+            self.theory_preset_combo,
+            self.theory_rho_v_spin,
+            self.theory_rho_l_spin,
+            self.theory_temperature_spin,
+            self.theory_molecule_mass_spin,
+            self.theory_v0_source_combo,
+            self.theory_theta_source_combo,
+            self.theory_fixed_theta_spin,
+            self.theory_fit_percent_spin,
+            self.theory_fit_alpha_min_spin,
+            self.theory_fit_alpha_max_spin,
+        )
+        for widget in compact_fields:
+            widget.setMinimumWidth(180)
+            widget.setMaximumWidth(360)
 
         run_group = QGroupBox("実行")
+        run_group.setMaximumWidth(1120)
         run_layout = QVBoxLayout(run_group)
         button_row = QHBoxLayout()
         self.run_button = QPushButton("解析実行")
@@ -2422,7 +2502,11 @@ class MainWindow(QMainWindow):
         run_layout.addLayout(button_row)
         self.progress = QProgressBar()
         run_layout.addWidget(self.progress)
-        settings_tab_layout.addWidget(run_group)
+        run_row = QHBoxLayout()
+        run_row.addStretch(1)
+        run_row.addWidget(run_group, 1)
+        run_row.addStretch(1)
+        settings_tab_layout.addLayout(run_row)
 
         results_tab = QWidget()
         results_layout = QVBoxLayout(results_tab)
@@ -2995,6 +3079,9 @@ class MainWindow(QMainWindow):
     def _set_source_mode(self, mode: str) -> None:
         is_remote = mode == "ssh"
         self.source_stack.setCurrentIndex(1 if is_remote else 0)
+        self.source_stack.setMaximumHeight(16_777_215 if is_remote else 150)
+        self.input_layout.setStretch(1, 2 if is_remote else 0)
+        self.input_layout.setStretch(2, 1)
         if is_remote:
             self.folder_edit.setText(self.remote_path_edit.text())
             if self.loaded_source != "SSH":
@@ -4433,6 +4520,33 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def log(self, message: str) -> None:
         self.log_box.append(message)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "settings_grid"):
+            self._update_settings_grid(event.size().width())
+
+    def _update_settings_grid(self, window_width: int) -> None:
+        compact = window_width < 1180
+        positions = (
+            (
+                (self.basic_group, 0, 0),
+                (self.advanced_group, 1, 0),
+                (self.fallback_group, 2, 0),
+                (self.theory_group, 3, 0),
+            )
+            if compact
+            else (
+                (self.basic_group, 0, 0),
+                (self.advanced_group, 0, 1),
+                (self.fallback_group, 1, 0),
+                (self.theory_group, 1, 1),
+            )
+        )
+        for widget, row, column in positions:
+            self.settings_grid.addWidget(widget, row, column)
+        self.settings_grid.setColumnStretch(0, 1)
+        self.settings_grid.setColumnStretch(1, 0 if compact else 1)
 
     def closeEvent(self, event) -> None:
         if self.remote_browser_connection is not None:
