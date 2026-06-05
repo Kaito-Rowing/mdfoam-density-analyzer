@@ -86,6 +86,77 @@ class GuiTheorySettingsTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_dashboard_sidebar_controls_pages_and_log_drawer(self) -> None:
+        window = MainWindow()
+        try:
+            self.assertTrue(window.workflow_tabs.tabBar().isHidden())
+            self.assertTrue(window.input_nav_button.isChecked())
+            self.assertEqual(window.workflow_tabs.currentIndex(), 0)
+            self.assertTrue(window.log_group.isHidden())
+
+            window.settings_nav_button.click()
+            self.assertEqual(window.workflow_tabs.currentIndex(), 1)
+            self.assertTrue(window.settings_nav_button.isChecked())
+
+            window.workflow_tabs.setCurrentIndex(2)
+            self.assertTrue(window.results_nav_button.isChecked())
+            self.assertEqual(window.page_title_label.text(), window.workflow_tabs.tabText(2))
+
+            window.log_toggle_button.click()
+            self.assertFalse(window.log_group.isHidden())
+            window.log_toggle_button.click()
+            self.assertTrue(window.log_group.isHidden())
+        finally:
+            window.close()
+
+    def test_dashboard_control_panels_collapse_and_expand(self) -> None:
+        window = MainWindow()
+        try:
+            self.assertFalse(window.graph_settings_group.isChecked())
+            self.assertEqual(window.graph_settings_group.maximumHeight(), 34)
+            window.graph_settings_group.setChecked(True)
+            self.assertGreater(window.graph_settings_group.maximumHeight(), 1000)
+
+            self.assertFalse(window.visual_settings_group.isChecked())
+            window.visual_settings_group.setChecked(True)
+            self.assertGreater(window.visual_settings_group.maximumHeight(), 1000)
+        finally:
+            window.close()
+
+    def test_dashboard_can_shrink_to_small_desktop_size(self) -> None:
+        window = MainWindow()
+        try:
+            window.resize(1024, 720)
+            window.show()
+            self.app.processEvents()
+            self.assertLessEqual(window.width(), 1024)
+            self.assertLessEqual(window.height(), 720)
+            self.assertTrue(window.workflow_tabs.isVisible())
+        finally:
+            window.close()
+
+    def test_dashboard_kpis_follow_selected_result(self) -> None:
+        window = MainWindow()
+        try:
+            result = CaseResult(
+                case_name="case_dashboard",
+                case_dir=Path(),
+                status="ok",
+                evaporation_time=2.5,
+                rows=[TimeResult(0.0, 3.0, 1.0, 1, 1, contact_angle_deg=82.0)],
+            )
+            window.results.append(result)
+            window.add_result_row(result)
+            window.table.setCurrentCell(0, 0)
+            window.update_selected_case_plots()
+
+            self.assertEqual(window.kpi_case_value.text(), "case_dashboard")
+            self.assertEqual(window.kpi_volume_value.text(), "3")
+            self.assertEqual(window.kpi_evaporation_value.text(), "2.5")
+            self.assertEqual(window.kpi_contact_value.text(), "82")
+        finally:
+            window.close()
+
     def test_time_plots_are_clipped_at_evaporation_time(self) -> None:
         window = MainWindow()
         try:
