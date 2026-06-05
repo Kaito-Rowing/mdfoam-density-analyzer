@@ -68,6 +68,8 @@ The contact angle workflow is designed to approximate a previous process where c
 - Handles a single case or many cases under a parent directory.
 - Supports SSH/SFTP workflows for remote HPC results without running commands on the remote host.
 - Exports summary CSV, time-series CSV, graph PNG files, visualization PNG files, and visualization GIF files.
+- Saves and reloads analysis settings as a versioned `mdfoam_project.json` file.
+- Exports a reproducibility-focused `analysis_manifest.json` with settings, input file metadata, mesh statistics, and result summaries.
 - Provides a PySide6 desktop GUI with case tables, plots, and visualization diagnostics.
 - UI language can be switched between Japanese, English, Chinese, Spanish, and Hindi.
 
@@ -209,6 +211,15 @@ CSV export writes two files:
 
 - `mdfoam_summary.csv`: one row per case, including maximum volume, final volume, evaporation time, initial/final valid contact angle, average contact angle, and initial/final valid contact radius.
 - `mdfoam_timeseries.csv`: one row per case and time, including time, volume, equivalent radius, selected cell count, total cell count, contact angle, contact radius, and contact fit point count.
+
+The same output folder also contains `analysis_manifest.json`. It records the
+application version, analysis settings, input paths, file sizes and modification
+times, mesh statistics, and one result summary per case. SSH passwords, secrets,
+and private-key paths are not written.
+
+Use **Save analysis settings** and **Load analysis settings** to exchange
+versioned `mdfoam_project.json` files. Loading a settings file updates only the
+analysis controls; it does not change the selected input or start analysis.
 
 PNG export supports the analysis graphs in the results tab. The visualization tab can export the current visual frame as PNG.
 

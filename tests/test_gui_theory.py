@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -19,8 +21,9 @@ try:
 except ImportError as exc:
     raise unittest.SkipTest(f"PySide6 GUI runtime is unavailable: {exc}") from exc
 
-from mdfoam_analyzer.analysis import CaseResult, TimeResult
+from mdfoam_analyzer.analysis import AnalysisSettings, CaseResult, TimeResult
 from mdfoam_analyzer.gui import CombinedPlotWidget, GraphPngPreviewDialog, MainWindow, PlotWidget
+from mdfoam_analyzer.provenance import RunContext
 from mdfoam_analyzer.theory import evaporation_flux
 
 
@@ -54,6 +57,92 @@ class GuiTheorySettingsTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_loading_analysis_settings_only_updates_analysis_controls(self) -> None:
+        window = MainWindow()
+        try:
+            original_source = window.source_combo.currentData()
+            settings = AnalysisSettings(
+                density_field="rhoN_custom",
+                density_threshold=321.0,
+                zero_tolerance=1.0e-20,
+                consecutive_zero_count=7,
+                manual_cell_volume=2.0e-27,
+                dx=1.0e-9,
+                dy=2.0e-9,
+                dz=3.0e-9,
+                contact_fit_lower=0.2,
+                contact_fit_upper=0.8,
+                contact_unwrap_xy=False,
+                contact_average_percent=55.0,
+            )
+
+            window.apply_analysis_settings(settings)
+
+            self.assertEqual(window.settings(), settings)
+            self.assertEqual(window.source_combo.currentData(), original_source)
+            self.assertIsNone(window.worker)
+            self.assertIsNone(window.thread)
+        finally:
+            window.close()
+
+    def test_csv_export_includes_analysis_manifest(self) -> None:
+        window = MainWindow()
+        try:
+            result = CaseResult(
+                case_name="case001",
+                case_dir=Path(),
+                status="ok",
+                rows=[TimeResult(0.0, 1.0, 1.0, 1, 1)],
+                source_case_path="/data/case001",
+            )
+            settings = AnalysisSettings()
+            window.results = [result]
+            window._last_run_settings = settings
+            window._last_run_context = RunContext(
+                "local", "/data", analysis_settings=settings
+            )
+            with tempfile.TemporaryDirectory() as temp_dir:
+                output = Path(temp_dir)
+                window._choose_output_directory = lambda *_: output
+
+                window.export_csv()
+
+                manifest = json.loads(
+                    (output / "analysis_manifest.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(
+                    manifest["analysis_settings"]["density_field"],
+                    "rhoM_water",
+                )
+                self.assertEqual(
+                    manifest["cases"][0]["result_summary"]["time_count"],
+                    1,
+                )
+        finally:
+            window.close()
+
+    def test_invalid_settings_file_does_not_change_current_values(self) -> None:
+        window = MainWindow()
+        try:
+            window.threshold_spin.setValue(777.0)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                path = Path(temp_dir) / "invalid.json"
+                path.write_text("{invalid", encoding="utf-8")
+                with (
+                    patch(
+                        "mdfoam_analyzer.gui.QFileDialog.getOpenFileName",
+                        return_value=(str(path), "JSON (*.json)"),
+                    ),
+                    patch("mdfoam_analyzer.gui.QMessageBox.warning"),
+                ):
+                    window.load_analysis_settings_file()
+
+            self.assertEqual(window.threshold_spin.value(), 777.0)
+        finally:
+            window.close()
+
     def test_ui_language_switches_without_changing_internal_settings(self) -> None:
         window = MainWindow()
         try:
@@ -76,6 +165,18 @@ class GuiTheorySettingsTests(unittest.TestCase):
             window.apply_language("en")
             self.assertEqual(window.workflow_tabs.tabText(0), "Input")
             self.assertEqual(window.export_csv_button.text(), "Export CSV")
+            self.assertEqual(
+                window.save_settings_button.text(),
+                "Save analysis settings",
+            )
+            self.assertEqual(
+                window.load_settings_button.text(),
+                "Load analysis settings",
+            )
+            self.assertEqual(
+                window.export_manifest_button.text(),
+                "Save analysis record",
+            )
             self.assertEqual(window.table.horizontalHeaderItem(0).text(), "Case")
             self.assertEqual(window.tabs.tabText(4), "Evaporation time")
             window.theory_theta_source_combo.setCurrentIndex(window.theory_theta_source_combo.findData("fixed"))
