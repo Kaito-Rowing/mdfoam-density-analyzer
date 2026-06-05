@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -20,7 +21,9 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -33,6 +36,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -99,6 +103,7 @@ from .theory import (
     write_theory_summary_csv,
     write_theory_timeseries_csv,
 )
+from .theme import APP_STYLESHEET, COLORS
 from .visualization import (
     PlotBounds,
     VisualizationFrame,
@@ -830,6 +835,7 @@ QUALITY_DPI_OPTIONS = {
     "高 600dpi": 600,
 }
 DEFAULT_QUALITY_LABEL = "標準 300dpi"
+PNG_PREVIEW_PIXELS_PER_INCH = 72
 
 
 def _tr(text: str, language: str = "ja") -> str:
@@ -858,7 +864,7 @@ def _combo_data(combo: QComboBox, default: str = "") -> str:
 
 @dataclass
 class GraphSettings:
-    point_color: str = "#1f77b4"
+    point_color: str = COLORS["accent"]
     point_size: float = 18.0
     point_alpha: float = 0.9
     font_size: int = 10
@@ -962,6 +968,31 @@ class ResultsTable(QTableWidget):
         QApplication.clipboard().setText("\n".join(lines))
 
 
+class CollapsibleGroupBox(QGroupBox):
+    def __init__(self, title: str, expanded: bool = True) -> None:
+        super().__init__(title)
+        self.setCheckable(True)
+        self.setChecked(expanded)
+        self.toggled.connect(self._sync_visibility)
+
+    @Slot(bool)
+    def _sync_visibility(self, expanded: bool) -> None:
+        layout = self.layout()
+        if layout is not None:
+            self._set_layout_visible(layout, expanded)
+        self.setMaximumHeight(16_777_215 if expanded else 34)
+
+    def _set_layout_visible(self, layout, visible: bool) -> None:
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget is not None:
+                widget.setVisible(visible)
+            elif child_layout is not None:
+                self._set_layout_visible(child_layout, visible)
+
+
 class AnalyzerWorker(QObject):
     progress = Signal(int, int)
     log = Signal(str)
@@ -1063,9 +1094,10 @@ class AnalyzerWorker(QObject):
 class PlotWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.figure = Figure(figsize=(5, 3), tight_layout=True)
+        self.figure = Figure(figsize=(5, 3), tight_layout=True, facecolor=COLORS["surface"])
         self.canvas = FigureCanvas(self.figure)
         self.settings = GraphSettings()
+        self.light_theme = False
         self._last_plot: tuple[str, str, str, str, list, list] | None = None
         self._last_series: tuple[str, str, str, list[PlotSeries]] | None = None
         layout = QVBoxLayout(self)
@@ -1122,7 +1154,7 @@ class PlotWidget(QWidget):
                     item.x,
                     item.y,
                     label=item.label,
-                    color=item.color,
+                    color=self._display_series_color(item.color),
                     linestyle=item.linestyle,
                     linewidth=item.linewidth,
                     alpha=self.settings.point_alpha,
@@ -1133,7 +1165,7 @@ class PlotWidget(QWidget):
                     item.y,
                     label=item.label,
                     s=self.settings.point_size,
-                    c=item.color or self.settings.point_color,
+                    c=self._display_series_color(item.color) or self.settings.point_color,
                     alpha=self.settings.point_alpha,
                     marker=item.marker or self.settings.marker,
                 )
@@ -1167,14 +1199,23 @@ class PlotWidget(QWidget):
             self.clear(title)
 
     def save_png(self, path: Path) -> None:
-        self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
-        self.figure.tight_layout()
-        self.figure.savefig(
-            path,
-            dpi=self.settings.dpi,
-            transparent=self.settings.transparent,
-            bbox_inches="tight",
-        )
+        original_theme = self.light_theme
+        self.light_theme = True
+        try:
+            self.redraw()
+            self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
+            self.figure.tight_layout()
+            self.figure.savefig(
+                path,
+                dpi=self.settings.dpi,
+                transparent=self.settings.transparent,
+                facecolor="white",
+                edgecolor="white",
+                bbox_inches="tight",
+            )
+        finally:
+            self.light_theme = original_theme
+            self.redraw()
 
     def copy_plot_state_from(self, other: "PlotWidget") -> None:
         self.settings = GraphSettings(**vars(other.settings))
@@ -1214,6 +1255,24 @@ class PlotWidget(QWidget):
         is_bar: bool = False,
     ) -> None:
         settings = self.settings
+        background = "#ffffff" if self.light_theme else COLORS["surface"]
+        foreground = "#111111" if self.light_theme else COLORS["muted"]
+        spine_color = "#111111" if self.light_theme else COLORS["border"]
+        grid_color = "#c8c8c8" if self.light_theme else COLORS["grid"]
+        self.figure.set_facecolor(background)
+        axis.set_facecolor(background)
+        axis.tick_params(colors=foreground)
+        axis.xaxis.label.set_color(foreground)
+        axis.yaxis.label.set_color(foreground)
+        axis.title.set_color("#111111" if self.light_theme else COLORS["text"])
+        for spine in axis.spines.values():
+            spine.set_color(spine_color)
+        legend = axis.get_legend()
+        if legend is not None:
+            legend.get_frame().set_facecolor("#ffffff" if self.light_theme else COLORS["surface_alt"])
+            legend.get_frame().set_edgecolor(spine_color)
+            for text in legend.get_texts():
+                text.set_color("#111111" if self.light_theme else COLORS["text"])
         if settings.title_visible and title:
             axis.set_title(title, fontsize=settings.font_size + 1)
         axis.set_xlabel(x_label if settings.axis_labels_visible else "", fontsize=settings.font_size)
@@ -1228,7 +1287,7 @@ class PlotWidget(QWidget):
             labelbottom=settings.tick_labels_visible,
             labelleft=settings.tick_labels_visible,
         )
-        axis.grid(settings.grid_visible, alpha=0.3)
+        axis.grid(settings.grid_visible, color=grid_color, alpha=0.65 if self.light_theme else 0.45)
         if settings.axis_mode in ("auto_fixed", "manual_fixed") or not settings.axis_auto:
             if not is_bar and settings.x_min < settings.x_max:
                 axis.set_xlim(settings.x_min, settings.x_max)
@@ -1239,14 +1298,25 @@ class PlotWidget(QWidget):
         else:
             axis.set_aspect("auto")
 
+    def _display_series_color(self, color: str | None) -> str | None:
+        if self.light_theme and color == COLORS["md_series"]:
+            return "#111111"
+        return color
+
 
 class CombinedPlotWidget(QWidget):
-    def __init__(self, source_plots: list[PlotWidget], owns_source_plots: bool = False) -> None:
+    def __init__(
+        self,
+        source_plots: list[PlotWidget],
+        owns_source_plots: bool = False,
+        light_theme: bool = False,
+    ) -> None:
         super().__init__()
-        self.figure = Figure(figsize=(8, 5), tight_layout=True)
+        self.figure = Figure(figsize=(8, 5), tight_layout=True, facecolor=COLORS["surface"])
         self.canvas = FigureCanvas(self.figure)
         self.source_plots = source_plots
         self.owns_source_plots = owns_source_plots
+        self.light_theme = light_theme
         self.settings = GraphSettings(**vars(source_plots[0].settings)) if source_plots else GraphSettings()
         self.settings.image_height = min(30.0, max(self.settings.image_height, self.settings.image_height * max(1, len(source_plots))))
         self._last_plot = source_plots[0]._last_plot if source_plots else None
@@ -1264,7 +1334,7 @@ class CombinedPlotWidget(QWidget):
             return
         axes = self.figure.subplots(len(self.source_plots), 1, squeeze=False)
         for axis, plot in zip(axes[:, 0], self.source_plots):
-            _draw_plot_on_axis(plot, axis, self._settings_for_source_plot(plot))
+            _draw_plot_on_axis(plot, axis, self._settings_for_source_plot(plot), self.light_theme)
         self.figure.tight_layout()
         self.canvas.draw_idle()
 
@@ -1281,14 +1351,23 @@ class CombinedPlotWidget(QWidget):
         return settings
 
     def save_png(self, path: Path) -> None:
-        self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
-        self.figure.tight_layout()
-        self.figure.savefig(
-            path,
-            dpi=self.settings.dpi,
-            transparent=self.settings.transparent,
-            bbox_inches="tight",
-        )
+        original_theme = self.light_theme
+        self.light_theme = True
+        try:
+            self.redraw()
+            self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
+            self.figure.tight_layout()
+            self.figure.savefig(
+                path,
+                dpi=self.settings.dpi,
+                transparent=self.settings.transparent,
+                facecolor="white",
+                edgecolor="white",
+                bbox_inches="tight",
+            )
+        finally:
+            self.light_theme = original_theme
+            self.redraw()
 
     def closeEvent(self, event) -> None:
         if self.owns_source_plots:
@@ -1325,8 +1404,10 @@ class GraphPngPreviewDialog(QDialog):
             if len(plots) == 1:
                 preview = PlotWidget()
                 preview.copy_plot_state_from(plots[0])
+                preview.light_theme = True
+                preview.redraw()
             else:
-                preview = CombinedPlotWidget(plots)
+                preview = CombinedPlotWidget(plots, light_theme=True)
             self.preview_widgets.append(preview)
         self.preview_plot: PlotWidget | CombinedPlotWidget = self.preview_widgets[0]
 
@@ -1338,8 +1419,14 @@ class GraphPngPreviewDialog(QDialog):
         settings_layout = QVBoxLayout(settings_group)
         body.addWidget(settings_group, 0)
         self.preview_stack = QStackedWidget()
+        self.preview_scroll_areas: list[QScrollArea] = []
         for widget in self.preview_widgets:
-            self.preview_stack.addWidget(widget)
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(False)
+            scroll_area.setAlignment(Qt.AlignCenter)
+            scroll_area.setWidget(widget)
+            self.preview_scroll_areas.append(scroll_area)
+            self.preview_stack.addWidget(scroll_area)
         body.addWidget(self.preview_stack, 1)
 
         self.source_combo: QComboBox | None = None
@@ -1436,6 +1523,7 @@ class GraphPngPreviewDialog(QDialog):
 
         self._load_controls_from_preview()
         self._connect_controls()
+        self._update_preview_canvas_size()
         buttons.button(QDialogButtonBox.Save).clicked.connect(self.save_png)
         buttons.rejected.connect(self.reject)
 
@@ -1555,7 +1643,17 @@ class GraphPngPreviewDialog(QDialog):
         settings.transparent = self.transparent_check.isChecked()
         self._update_axis_spin_enabled()
         self.preview_plot.figure.set_size_inches(settings.image_width, settings.image_height, forward=False)
+        self._update_preview_canvas_size()
         self.preview_plot.redraw()
+
+    def _update_preview_canvas_size(self) -> None:
+        settings = self.preview_plot.settings
+        width = max(1, round(settings.image_width * PNG_PREVIEW_PIXELS_PER_INCH))
+        height = max(1, round(settings.image_height * PNG_PREVIEW_PIXELS_PER_INCH))
+        self.preview_plot.figure.set_dpi(PNG_PREVIEW_PIXELS_PER_INCH)
+        self.preview_plot.figure.set_size_inches(settings.image_width, settings.image_height, forward=False)
+        self.preview_plot.canvas.setFixedSize(width, height)
+        self.preview_plot.setFixedSize(width, height)
 
     def _update_axis_spin_enabled(self) -> None:
         plot_kind = self.preview_plot._last_plot[0] if self.preview_plot._last_plot is not None else "xy"
@@ -1589,7 +1687,7 @@ class GraphPngPreviewDialog(QDialog):
 class VisualizationPlotWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.figure = Figure(figsize=(6, 4), tight_layout=True)
+        self.figure = Figure(figsize=(6, 4), tight_layout=True, facecolor=COLORS["surface"])
         self.canvas = FigureCanvas(self.figure)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1598,7 +1696,16 @@ class VisualizationPlotWidget(QWidget):
     def clear(self, message: str = "可視化するケースと時刻を選択してください") -> None:
         self.figure.clear()
         axis = self.figure.add_subplot(111)
-        axis.text(0.5, 0.5, message, ha="center", va="center", transform=axis.transAxes)
+        axis.set_facecolor(COLORS["surface"])
+        axis.text(
+            0.5,
+            0.5,
+            message,
+            color=COLORS["muted"],
+            ha="center",
+            va="center",
+            transform=axis.transAxes,
+        )
         axis.set_axis_off()
         self.canvas.draw_idle()
 
@@ -1693,8 +1800,25 @@ class VisualizationPlotWidget(QWidget):
             downsample,
             is_3d,
         )
+        self._apply_dark_axis_style(axis, is_3d)
         self.canvas.draw_idle()
         return downsample
+
+    def _apply_dark_axis_style(self, axis, is_3d: bool) -> None:
+        self.figure.set_facecolor(COLORS["surface"])
+        axis.set_facecolor(COLORS["surface"])
+        axis.tick_params(colors=COLORS["muted"])
+        axis.xaxis.label.set_color(COLORS["muted"])
+        axis.yaxis.label.set_color(COLORS["muted"])
+        axis.title.set_color(COLORS["text"])
+        if is_3d and hasattr(axis, "zaxis"):
+            axis.zaxis.label.set_color(COLORS["muted"])
+            axis.zaxis.set_tick_params(colors=COLORS["muted"])
+            for pane in (axis.xaxis.pane, axis.yaxis.pane, axis.zaxis.pane):
+                pane.set_facecolor(COLORS["surface_alt"])
+                pane.set_edgecolor(COLORS["border"])
+        for spine in axis.spines.values():
+            spine.set_color(COLORS["border"])
 
     def save_png(self, path: Path) -> None:
         self.figure.savefig(path, dpi=180)
@@ -2049,6 +2173,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.language = "ja"
+        self.setStyleSheet(APP_STYLESHEET)
         self.setWindowTitle(_tr("mdFOAM 密度解析アプリ", self.language))
         self.resize(1360, 900)
 
@@ -2082,29 +2207,95 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget()
         self.setCentralWidget(root)
-        root_layout = QVBoxLayout(root)
+        root_layout = QHBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        language_row = QHBoxLayout()
-        language_row.addStretch(1)
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(232)
+        sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(18, 24, 18, 18)
+        sidebar_layout.setSpacing(8)
+        brand_title = QLabel("mdFOAM")
+        brand_title.setObjectName("brandTitle")
+        brand_subtitle = QLabel("DENSITY ANALYZER")
+        brand_subtitle.setObjectName("brandSubtitle")
+        sidebar_layout.addWidget(brand_title)
+        sidebar_layout.addWidget(brand_subtitle)
+        sidebar_layout.addSpacing(24)
+
+        self.workflow_nav_group = QButtonGroup(self)
+        self.workflow_nav_group.setExclusive(True)
+        self.input_nav_button = QPushButton("入力")
+        self.settings_nav_button = QPushButton("解析設定")
+        self.results_nav_button = QPushButton("結果")
+        self.workflow_nav_buttons = [
+            self.input_nav_button,
+            self.settings_nav_button,
+            self.results_nav_button,
+        ]
+        for index, button in enumerate(self.workflow_nav_buttons):
+            button.setCheckable(True)
+            button.setProperty("nav", True)
+            self.workflow_nav_group.addButton(button, index)
+            sidebar_layout.addWidget(button)
+        self.input_nav_button.setChecked(True)
+        sidebar_layout.addStretch(1)
+        self.log_toggle_button = QPushButton("ログ")
+        self.log_toggle_button.setCheckable(True)
+        self.log_toggle_button.setProperty("nav", True)
+        sidebar_layout.addWidget(self.log_toggle_button)
+
         self.language_label = QLabel("言語")
         self.language_combo = QComboBox()
         for code, label in LANGUAGES.items():
             self.language_combo.addItem(label, code)
-        language_row.addWidget(self.language_label)
-        language_row.addWidget(self.language_combo)
-        root_layout.addLayout(language_row)
+        sidebar_layout.addWidget(self.language_label)
+        sidebar_layout.addWidget(self.language_combo)
+        root_layout.addWidget(self.sidebar)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(24, 18, 24, 18)
+        content_layout.setSpacing(12)
+        page_header = QHBoxLayout()
+        page_header_text = QVBoxLayout()
+        self.page_title_label = QLabel("入力")
+        self.page_title_label.setObjectName("pageTitle")
+        self.page_subtitle_label = QLabel("解析対象とデータソースを選択")
+        self.page_subtitle_label.setObjectName("pageSubtitle")
+        page_header_text.addWidget(self.page_title_label)
+        page_header_text.addWidget(self.page_subtitle_label)
+        page_header.addLayout(page_header_text)
+        page_header.addStretch(1)
+        content_layout.addLayout(page_header)
 
         self.workflow_tabs = QTabWidget()
-        root_layout.addWidget(self.workflow_tabs, 1)
+        self.workflow_tabs.tabBar().hide()
+        self.workflow_tabs.setDocumentMode(True)
+        self.workflow_tabs.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        content_layout.addWidget(self.workflow_tabs, 1)
 
         input_tab = QWidget()
-        input_layout = QVBoxLayout(input_tab)
+        input_outer_layout = QHBoxLayout(input_tab)
+        input_outer_layout.setContentsMargins(0, 0, 0, 0)
+        input_outer_layout.addStretch(1)
+        self.input_content = QWidget()
+        self.input_content.setMaximumWidth(1120)
+        input_layout = QVBoxLayout(self.input_content)
+        self.input_layout = input_layout
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(12)
+        input_outer_layout.addWidget(self.input_content, 1)
+        input_outer_layout.addStretch(1)
         self.workflow_tabs.addTab(input_tab, "入力")
 
         source_group = QGroupBox("入力元")
         source_layout = QVBoxLayout(source_group)
         source_row = QHBoxLayout()
         self.source_combo = QComboBox()
+        self.source_combo.setMaximumWidth(200)
         _combo_set_items(self.source_combo, [("ローカル", "local"), ("SSH", "ssh")], self.language)
         self.folder_edit = QLabel()
         self.folder_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -2118,7 +2309,7 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(source_group)
 
         self.source_stack = QStackedWidget()
-        input_layout.addWidget(self.source_stack, 2)
+        input_layout.addWidget(self.source_stack)
 
         local_panel = QWidget()
         local_layout = QVBoxLayout(local_panel)
@@ -2129,7 +2320,6 @@ class MainWindow(QMainWindow):
         local_group_layout.addStretch(1)
         local_group_layout.addWidget(self.browse_button)
         local_layout.addWidget(local_group)
-        local_layout.addStretch(1)
         self.source_stack.addWidget(local_panel)
 
         ssh_panel = QWidget()
@@ -2164,6 +2354,16 @@ class MainWindow(QMainWindow):
         ssh_form.addRow("パスフレーズ/パスワード", self.secret_edit)
         ssh_form.addRow("リモートパス", self.remote_path_edit)
         ssh_form.addRow("", self.save_credentials_check)
+        for widget in (
+            self.profile_edit,
+            self.host_edit,
+            self.port_spin,
+            self.username_edit,
+            self.key_path_edit,
+            self.secret_edit,
+            self.remote_path_edit,
+        ):
+            widget.setMaximumWidth(360)
         ssh_splitter.addWidget(self.ssh_group)
 
         browser_group = QGroupBox("リモートフォルダ")
@@ -2195,7 +2395,7 @@ class MainWindow(QMainWindow):
         self.case_list = QListWidget()
         self.case_list.setSelectionMode(QAbstractItemView.SingleSelection)
         case_layout.addWidget(self.case_list, 1)
-        input_layout.addWidget(case_group, 3)
+        input_layout.addWidget(case_group, 1)
 
         settings_tab = QWidget()
         settings_tab_layout = QVBoxLayout(settings_tab)
@@ -2203,13 +2403,23 @@ class MainWindow(QMainWindow):
 
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
-        settings_content = QWidget()
-        settings_content_layout = QVBoxLayout(settings_content)
-        settings_scroll.setWidget(settings_content)
+        settings_canvas = QWidget()
+        settings_canvas_layout = QHBoxLayout(settings_canvas)
+        settings_canvas_layout.setContentsMargins(0, 0, 0, 0)
+        settings_canvas_layout.addStretch(1)
+        self.settings_content = QWidget()
+        self.settings_content.setMaximumWidth(1120)
+        self.settings_grid = QGridLayout(self.settings_content)
+        self.settings_grid.setContentsMargins(0, 0, 0, 0)
+        self.settings_grid.setHorizontalSpacing(14)
+        self.settings_grid.setVerticalSpacing(14)
+        settings_canvas_layout.addWidget(self.settings_content, 1)
+        settings_canvas_layout.addStretch(1)
+        settings_scroll.setWidget(settings_canvas)
         settings_tab_layout.addWidget(settings_scroll, 1)
 
-        basic_group = QGroupBox("基本設定")
-        basic_layout = QFormLayout(basic_group)
+        self.basic_group = QGroupBox("基本設定")
+        basic_layout = QFormLayout(self.basic_group)
         basic_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.field_combo = QComboBox()
         self.field_combo.setMinimumWidth(260)
@@ -2222,15 +2432,24 @@ class MainWindow(QMainWindow):
         basic_layout.addRow("密度しきい値", self.threshold_spin)
         basic_layout.addRow("0判定許容値", self.zero_spin)
         basic_layout.addRow("連続ゼロ数", self.zero_count_spin)
-        settings_content_layout.addWidget(basic_group)
+        self.settings_grid.addWidget(self.basic_group, 0, 0)
 
-        advanced_group = QGroupBox("詳細設定")
-        advanced_layout = QFormLayout(advanced_group)
-        advanced_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.fallback_group = QGroupBox("セル体積 fallback")
+        fallback_layout = QFormLayout(self.fallback_group)
+        fallback_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.cell_volume_spin = self._scientific_spin(0.0)
         self.dx_spin = self._scientific_spin(0.0)
         self.dy_spin = self._scientific_spin(0.0)
         self.dz_spin = self._scientific_spin(0.0)
+        fallback_layout.addRow("セル体積 fallback", self.cell_volume_spin)
+        fallback_layout.addRow("dx fallback", self.dx_spin)
+        fallback_layout.addRow("dy fallback", self.dy_spin)
+        fallback_layout.addRow("dz fallback", self.dz_spin)
+        self.settings_grid.addWidget(self.fallback_group, 1, 0)
+
+        self.advanced_group = QGroupBox("詳細設定")
+        advanced_layout = QFormLayout(self.advanced_group)
+        advanced_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.contact_fit_lower_spin = self._fraction_spin(0.5)
         self.contact_fit_upper_spin = self._fraction_spin(1.0)
         self.contact_average_percent_spin = QDoubleSpinBox()
@@ -2241,18 +2460,14 @@ class MainWindow(QMainWindow):
         self.contact_average_percent_spin.setValue(100.0)
         self.contact_unwrap_check = QCheckBox("有効")
         self.contact_unwrap_check.setChecked(True)
-        advanced_layout.addRow("セル体積 fallback", self.cell_volume_spin)
-        advanced_layout.addRow("dx fallback", self.dx_spin)
-        advanced_layout.addRow("dy fallback", self.dy_spin)
-        advanced_layout.addRow("dz fallback", self.dz_spin)
         advanced_layout.addRow("接触角fit下限", self.contact_fit_lower_spin)
         advanced_layout.addRow("接触角fit上限", self.contact_fit_upper_spin)
         advanced_layout.addRow("平均接触角の対象範囲", self.contact_average_percent_spin)
         advanced_layout.addRow("xy周期補正", self.contact_unwrap_check)
-        settings_content_layout.addWidget(advanced_group)
+        self.settings_grid.addWidget(self.advanced_group, 0, 1)
 
-        theory_group = QGroupBox("蒸発係数 / 理論比較")
-        theory_layout = QFormLayout(theory_group)
+        self.theory_group = QGroupBox("蒸発係数 / 理論比較")
+        theory_layout = QFormLayout(self.theory_group)
         theory_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         default_theory = THEORY_PRESETS["xlsx準拠"]
         self.theory_preset_combo = QComboBox()
@@ -2304,10 +2519,41 @@ class MainWindow(QMainWindow):
         theory_layout.addRow("fit alpha_e 下限", self.theory_fit_alpha_min_spin)
         theory_layout.addRow("fit alpha_e 上限", self.theory_fit_alpha_max_spin)
         theory_layout.addRow("計算確認", self.theory_diagnostics_label)
-        settings_content_layout.addWidget(theory_group)
-        settings_content_layout.addStretch(1)
+        self.settings_grid.addWidget(self.theory_group, 1, 1)
+        self.settings_grid.setColumnStretch(0, 1)
+        self.settings_grid.setColumnStretch(1, 1)
+        self.settings_grid.setRowStretch(2, 1)
+
+        compact_fields = (
+            self.field_combo,
+            self.threshold_spin,
+            self.zero_spin,
+            self.zero_count_spin,
+            self.cell_volume_spin,
+            self.dx_spin,
+            self.dy_spin,
+            self.dz_spin,
+            self.contact_fit_lower_spin,
+            self.contact_fit_upper_spin,
+            self.contact_average_percent_spin,
+            self.theory_preset_combo,
+            self.theory_rho_v_spin,
+            self.theory_rho_l_spin,
+            self.theory_temperature_spin,
+            self.theory_molecule_mass_spin,
+            self.theory_v0_source_combo,
+            self.theory_theta_source_combo,
+            self.theory_fixed_theta_spin,
+            self.theory_fit_percent_spin,
+            self.theory_fit_alpha_min_spin,
+            self.theory_fit_alpha_max_spin,
+        )
+        for widget in compact_fields:
+            widget.setMinimumWidth(180)
+            widget.setMaximumWidth(360)
 
         run_group = QGroupBox("実行")
+        run_group.setMaximumWidth(1120)
         run_layout = QVBoxLayout(run_group)
         project_row = QHBoxLayout()
         self.save_settings_button = QPushButton("解析設定を保存")
@@ -2318,7 +2564,9 @@ class MainWindow(QMainWindow):
         run_layout.addLayout(project_row)
         button_row = QHBoxLayout()
         self.run_button = QPushButton("解析実行")
+        self.run_button.setProperty("variant", "primary")
         self.stop_button = QPushButton("停止")
+        self.stop_button.setProperty("variant", "danger")
         self.stop_button.setEnabled(False)
         button_row.addWidget(self.run_button)
         button_row.addWidget(self.stop_button)
@@ -2326,7 +2574,11 @@ class MainWindow(QMainWindow):
         run_layout.addLayout(button_row)
         self.progress = QProgressBar()
         run_layout.addWidget(self.progress)
-        settings_tab_layout.addWidget(run_group)
+        run_row = QHBoxLayout()
+        run_row.addStretch(1)
+        run_row.addWidget(run_group, 1)
+        run_row.addStretch(1)
+        settings_tab_layout.addLayout(run_row)
 
         results_tab = QWidget()
         results_layout = QVBoxLayout(results_tab)
@@ -2345,7 +2597,15 @@ class MainWindow(QMainWindow):
         export_row.addWidget(self.export_all_png_button)
         results_layout.addLayout(export_row)
 
-        graph_settings_group = QGroupBox("グラフ表示設定")
+        self.kpi_cards_layout = QHBoxLayout()
+        self.kpi_case_value = self._add_kpi_card(self.kpi_cards_layout, "ケース", "-")
+        self.kpi_volume_value = self._add_kpi_card(self.kpi_cards_layout, "最大体積", "-")
+        self.kpi_evaporation_value = self._add_kpi_card(self.kpi_cards_layout, "蒸発完了時刻", "-")
+        self.kpi_contact_value = self._add_kpi_card(self.kpi_cards_layout, "平均接触角", "-")
+        results_layout.addLayout(self.kpi_cards_layout)
+
+        graph_settings_group = CollapsibleGroupBox("グラフ表示設定", expanded=False)
+        self.graph_settings_group = graph_settings_group
         graph_settings_layout = QVBoxLayout(graph_settings_group)
         graph_row1 = QHBoxLayout()
         self.graph_color_button = QPushButton("色")
@@ -2436,6 +2696,7 @@ class MainWindow(QMainWindow):
         results_layout.addWidget(graph_settings_group)
 
         self.table = ResultsTable(0, 16)
+        self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.table_header_sources = [
             "ケース",
             "時刻数",
@@ -2463,24 +2724,10 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setStyleSheet(
-            """
-            QTableWidget::item {
-                padding-left: 6px;
-                padding-right: 6px;
-            }
-            QTableWidget::item:selected {
-                background: #e7f0fb;
-                color: #111111;
-            }
-            QTableWidget::item:focus {
-                outline: 0;
-                border: none;
-            }
-            """
-        )
+        self.table.setAlternatingRowColors(True)
 
         self.tabs = QTabWidget()
+        self.tabs.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.volume_plot = PlotWidget()
         self.radius_plot = PlotWidget()
         self.contact_angle_plot = PlotWidget()
@@ -2539,6 +2786,8 @@ class MainWindow(QMainWindow):
         visual_top_row.addWidget(self.visual_time_label)
         visual_layout.addLayout(visual_top_row)
 
+        self.visual_settings_group = CollapsibleGroupBox("表示", expanded=False)
+        visual_settings_layout = QVBoxLayout(self.visual_settings_group)
         visual_options_row = QHBoxLayout()
         self.visual_mode_combo = QComboBox()
         _combo_set_items(self.visual_mode_combo, [("2D診断", "2d"), ("3D概観", "3d")], self.language)
@@ -2592,7 +2841,7 @@ class MainWindow(QMainWindow):
         visual_options_row.addWidget(self.visual_liquid_check)
         visual_options_row.addWidget(self.visual_fit_check)
         visual_options_row.addStretch(1)
-        visual_layout.addLayout(visual_options_row)
+        visual_settings_layout.addLayout(visual_options_row)
 
         visual_export_row = QHBoxLayout()
         self.visual_range_start_slider = QSlider(Qt.Horizontal)
@@ -2614,7 +2863,8 @@ class MainWindow(QMainWindow):
         visual_export_row.addWidget(self.visual_fps_spin)
         visual_export_row.addWidget(self.visual_png_button)
         visual_export_row.addWidget(self.visual_gif_button)
-        visual_layout.addLayout(visual_export_row)
+        visual_settings_layout.addLayout(visual_export_row)
+        visual_layout.addWidget(self.visual_settings_group)
         visual_layout.addWidget(self.visual_plot, 1)
         self.visual_plot.clear()
         self.tabs.addTab(self.visual_tab, "可視化")
@@ -2632,13 +2882,32 @@ class MainWindow(QMainWindow):
         self.theory_em_plot.clear("蒸発量 EM-時間")
         self.theory_radius_plot.clear("理論/MD 等価半径-時間")
 
-        log_group = QGroupBox("ログ")
-        log_layout = QVBoxLayout(log_group)
+        self.log_group = QGroupBox("ログ")
+        log_layout = QVBoxLayout(self.log_group)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setMaximumHeight(140)
         log_layout.addWidget(self.log_box)
-        root_layout.addWidget(log_group)
+        self.log_group.setVisible(False)
+        content_layout.addWidget(self.log_group)
+        root_layout.addWidget(content, 1)
+        self.graph_settings_group._sync_visibility(False)
+        self.visual_settings_group._sync_visibility(False)
+
+    def _add_kpi_card(self, layout: QHBoxLayout, label: str, value: str) -> QLabel:
+        card = QFrame()
+        card.setProperty("kpi", True)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 10, 14, 10)
+        label_widget = QLabel(label)
+        label_widget.setProperty("kpiLabel", True)
+        value_widget = QLabel(value)
+        value_widget.setProperty("kpiValue", True)
+        value_widget.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        card_layout.addWidget(label_widget)
+        card_layout.addWidget(value_widget)
+        layout.addWidget(card, 1)
+        return value_widget
 
     def _configure_spinbox_input_behavior(self) -> None:
         for spin in self.findChildren(QSpinBox):
@@ -2647,6 +2916,9 @@ class MainWindow(QMainWindow):
             spin.setKeyboardTracking(False)
 
     def _connect_signals(self) -> None:
+        self.workflow_nav_group.idClicked.connect(self.workflow_tabs.setCurrentIndex)
+        self.workflow_tabs.currentChanged.connect(self._workflow_page_changed)
+        self.log_toggle_button.toggled.connect(self.log_group.setVisible)
         self.language_combo.currentIndexChanged.connect(lambda _: self.apply_language(_combo_data(self.language_combo, "ja")))
         self.source_combo.currentIndexChanged.connect(lambda _: self._set_source_mode(_combo_data(self.source_combo, "local")))
         self.browse_button.clicked.connect(self.choose_folder)
@@ -2747,6 +3019,20 @@ class MainWindow(QMainWindow):
         self.visual_gif_button.clicked.connect(self.export_visual_gif)
         self.load_graph_settings_from_current_plot()
         self.refresh_theory_outputs()
+        self._workflow_page_changed(self.workflow_tabs.currentIndex())
+
+    @Slot(int)
+    def _workflow_page_changed(self, index: int) -> None:
+        if 0 <= index < len(self.workflow_nav_buttons):
+            self.workflow_nav_buttons[index].setChecked(True)
+            self.page_title_label.setText(self.workflow_tabs.tabText(index))
+        subtitles = [
+            "解析対象ケースを含むフォルダを選択します。",
+            "解析設定",
+            "結果",
+        ]
+        if 0 <= index < len(subtitles):
+            self.page_subtitle_label.setText(self.t(subtitles[index]))
 
     def t(self, text: str) -> str:
         return _tr(text, self.language)
@@ -2772,6 +3058,7 @@ class MainWindow(QMainWindow):
         self.table.setHorizontalHeaderLabels([self.t(header) for header in self.table_header_sources])
         self._translate_tabs(self.workflow_tabs)
         self._translate_tabs(self.tabs)
+        self._workflow_page_changed(self.workflow_tabs.currentIndex())
         self.load_graph_settings_from_current_plot()
         self.update_visual_controls()
         self.refresh_current_result_tab()
@@ -2869,10 +3156,14 @@ class MainWindow(QMainWindow):
         self._theory_comparison_cache.clear()
         self._auto_axis_ranges.clear()
         self.table.setRowCount(0)
+        self._update_kpi_cards(None)
 
     def _set_source_mode(self, mode: str) -> None:
         is_remote = mode == "ssh"
         self.source_stack.setCurrentIndex(1 if is_remote else 0)
+        self.source_stack.setMaximumHeight(16_777_215 if is_remote else 150)
+        self.input_layout.setStretch(1, 2 if is_remote else 0)
+        self.input_layout.setStretch(2, 1)
         if is_remote:
             self.folder_edit.setText(self.remote_path_edit.text())
             if self.loaded_source != "SSH":
@@ -3571,6 +3862,7 @@ class MainWindow(QMainWindow):
 
     def refresh_current_result_tab(self) -> None:
         result = self.current_result()
+        self._update_kpi_cards(result)
         tab = self.tabs.currentWidget()
         if tab is self.volume_plot:
             if result is None:
@@ -3598,6 +3890,27 @@ class MainWindow(QMainWindow):
             self.update_theory_plots(result)
         elif tab is self.visual_tab:
             self.update_visual_controls(result)
+
+    def _update_kpi_cards(self, result: CaseResult | None) -> None:
+        if result is None:
+            values = ("-", "-", "-", "-")
+        else:
+            values = (
+                result.case_name,
+                _fmt(result.max_volume),
+                _fmt_optional(result.evaporation_time),
+                _fmt_optional(result.average_contact_angle_deg),
+            )
+        for label, value in zip(
+            (
+                self.kpi_case_value,
+                self.kpi_volume_value,
+                self.kpi_evaporation_value,
+                self.kpi_contact_value,
+            ),
+            values,
+        ):
+            label.setText(value or "-")
 
     def current_result(self) -> CaseResult | None:
         current_row = self.table.currentRow()
@@ -3692,7 +4005,7 @@ class MainWindow(QMainWindow):
                     em_times,
                     md_evaporated_masses,
                     style="scatter",
-                    color="#111111",
+                    color=COLORS["md_series"],
                     marker="o",
                 )
             )
@@ -3702,7 +4015,7 @@ class MainWindow(QMainWindow):
                     radius_times,
                     md_equivalent_radii,
                     style="scatter",
-                    color="#111111",
+                    color=COLORS["md_series"],
                     marker="o",
                 )
             )
@@ -4202,7 +4515,9 @@ class MainWindow(QMainWindow):
         if self.theory_show_md_check.isChecked():
             values = comparison.md_evaporated_masses if value_kind == "em" else comparison.md_equivalent_radii
             x_values, y_values = _clip_xy_to_evaporation(result, comparison.times, values)
-            series_list.append(PlotSeries("MD", x_values, y_values, style="scatter", color="#111111", marker="o"))
+            series_list.append(
+                PlotSeries("MD", x_values, y_values, style="scatter", color=COLORS["md_series"], marker="o")
+            )
         alpha_colors = {0.8: "#1f77b4", 0.9: "#ff7f0e", 1.0: "#2ca02c"}
         for alpha, checkbox in self.theory_alpha_checks.items():
             if not checkbox.isChecked():
@@ -4402,6 +4717,33 @@ class MainWindow(QMainWindow):
     def log(self, message: str) -> None:
         self.log_box.append(message)
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "settings_grid"):
+            self._update_settings_grid(event.size().width())
+
+    def _update_settings_grid(self, window_width: int) -> None:
+        compact = window_width < 1180
+        positions = (
+            (
+                (self.basic_group, 0, 0),
+                (self.advanced_group, 1, 0),
+                (self.fallback_group, 2, 0),
+                (self.theory_group, 3, 0),
+            )
+            if compact
+            else (
+                (self.basic_group, 0, 0),
+                (self.advanced_group, 0, 1),
+                (self.fallback_group, 1, 0),
+                (self.theory_group, 1, 1),
+            )
+        )
+        for widget, row, column in positions:
+            self.settings_grid.addWidget(widget, row, column)
+        self.settings_grid.setColumnStretch(0, 1)
+        self.settings_grid.setColumnStretch(1, 0 if compact else 1)
+
     def closeEvent(self, event) -> None:
         if self.remote_browser_connection is not None:
             self.remote_browser_connection.close()
@@ -4442,13 +4784,20 @@ def _padded_value_range(values: list[float]) -> tuple[float, float] | None:
     return lower, upper
 
 
-def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
+def _draw_plot_on_axis(
+    plot: PlotWidget,
+    axis,
+    settings: GraphSettings,
+    light_theme: bool = False,
+) -> None:
     if plot._last_plot is None:
         axis.set_axis_off()
         return
     kind, title, x_label, y_label, x, y = plot._last_plot
     original_settings = plot.settings
+    original_theme = plot.light_theme
     plot.settings = settings
+    plot.light_theme = light_theme
     try:
         if kind == "xy":
             axis.scatter(
@@ -4474,7 +4823,7 @@ def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
                         item.x,
                         item.y,
                         label=item.label,
-                        color=item.color,
+                        color=plot._display_series_color(item.color),
                         linestyle=item.linestyle,
                         linewidth=item.linewidth,
                         alpha=settings.point_alpha,
@@ -4485,7 +4834,7 @@ def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
                         item.y,
                         label=item.label,
                         s=settings.point_size,
-                        c=item.color or settings.point_color,
+                        c=plot._display_series_color(item.color) or settings.point_color,
                         alpha=settings.point_alpha,
                         marker=item.marker or settings.marker,
                     )
@@ -4496,6 +4845,7 @@ def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
             plot._apply_common_style(axis, "", "", title)
     finally:
         plot.settings = original_settings
+        plot.light_theme = original_theme
 
 
 def _quality_label_for_dpi(dpi: int) -> str:
@@ -4560,6 +4910,7 @@ def _status_label(status: str) -> str:
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setStyleSheet(APP_STYLESHEET)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
