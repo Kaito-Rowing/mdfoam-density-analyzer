@@ -10,6 +10,7 @@ COLORS = {
     "border": "#3a3d3b",
     "text": "#ffffff",
     "muted": "#b3b3b3",
+    "md_series": "#f2f5f3",
     "accent": "#31d17c",
     "accent_hover": "#43e38e",
     "accent_pressed": "#25b96a",
@@ -28,6 +29,9 @@ QWidget {
 }
 QMainWindow, QDialog {
     background: #121212;
+}
+QLabel, QCheckBox, QRadioButton {
+    background: transparent;
 }
 QFrame#sidebar {
     background: #0d0f0e;

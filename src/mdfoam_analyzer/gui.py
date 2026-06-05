@@ -1032,6 +1032,7 @@ class PlotWidget(QWidget):
         self.figure = Figure(figsize=(5, 3), tight_layout=True, facecolor=COLORS["surface"])
         self.canvas = FigureCanvas(self.figure)
         self.settings = GraphSettings()
+        self.light_theme = False
         self._last_plot: tuple[str, str, str, str, list, list] | None = None
         self._last_series: tuple[str, str, str, list[PlotSeries]] | None = None
         layout = QVBoxLayout(self)
@@ -1088,7 +1089,7 @@ class PlotWidget(QWidget):
                     item.x,
                     item.y,
                     label=item.label,
-                    color=item.color,
+                    color=self._display_series_color(item.color),
                     linestyle=item.linestyle,
                     linewidth=item.linewidth,
                     alpha=self.settings.point_alpha,
@@ -1099,7 +1100,7 @@ class PlotWidget(QWidget):
                     item.y,
                     label=item.label,
                     s=self.settings.point_size,
-                    c=item.color or self.settings.point_color,
+                    c=self._display_series_color(item.color) or self.settings.point_color,
                     alpha=self.settings.point_alpha,
                     marker=item.marker or self.settings.marker,
                 )
@@ -1133,14 +1134,23 @@ class PlotWidget(QWidget):
             self.clear(title)
 
     def save_png(self, path: Path) -> None:
-        self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
-        self.figure.tight_layout()
-        self.figure.savefig(
-            path,
-            dpi=self.settings.dpi,
-            transparent=self.settings.transparent,
-            bbox_inches="tight",
-        )
+        original_theme = self.light_theme
+        self.light_theme = True
+        try:
+            self.redraw()
+            self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
+            self.figure.tight_layout()
+            self.figure.savefig(
+                path,
+                dpi=self.settings.dpi,
+                transparent=self.settings.transparent,
+                facecolor="white",
+                edgecolor="white",
+                bbox_inches="tight",
+            )
+        finally:
+            self.light_theme = original_theme
+            self.redraw()
 
     def copy_plot_state_from(self, other: "PlotWidget") -> None:
         self.settings = GraphSettings(**vars(other.settings))
@@ -1180,14 +1190,24 @@ class PlotWidget(QWidget):
         is_bar: bool = False,
     ) -> None:
         settings = self.settings
-        self.figure.set_facecolor(COLORS["surface"])
-        axis.set_facecolor(COLORS["surface"])
-        axis.tick_params(colors=COLORS["muted"])
-        axis.xaxis.label.set_color(COLORS["muted"])
-        axis.yaxis.label.set_color(COLORS["muted"])
-        axis.title.set_color(COLORS["text"])
+        background = "#ffffff" if self.light_theme else COLORS["surface"]
+        foreground = "#111111" if self.light_theme else COLORS["muted"]
+        spine_color = "#111111" if self.light_theme else COLORS["border"]
+        grid_color = "#c8c8c8" if self.light_theme else COLORS["grid"]
+        self.figure.set_facecolor(background)
+        axis.set_facecolor(background)
+        axis.tick_params(colors=foreground)
+        axis.xaxis.label.set_color(foreground)
+        axis.yaxis.label.set_color(foreground)
+        axis.title.set_color("#111111" if self.light_theme else COLORS["text"])
         for spine in axis.spines.values():
-            spine.set_color(COLORS["border"])
+            spine.set_color(spine_color)
+        legend = axis.get_legend()
+        if legend is not None:
+            legend.get_frame().set_facecolor("#ffffff" if self.light_theme else COLORS["surface_alt"])
+            legend.get_frame().set_edgecolor(spine_color)
+            for text in legend.get_texts():
+                text.set_color("#111111" if self.light_theme else COLORS["text"])
         if settings.title_visible and title:
             axis.set_title(title, fontsize=settings.font_size + 1)
         axis.set_xlabel(x_label if settings.axis_labels_visible else "", fontsize=settings.font_size)
@@ -1202,7 +1222,7 @@ class PlotWidget(QWidget):
             labelbottom=settings.tick_labels_visible,
             labelleft=settings.tick_labels_visible,
         )
-        axis.grid(settings.grid_visible, color=COLORS["grid"], alpha=0.45)
+        axis.grid(settings.grid_visible, color=grid_color, alpha=0.65 if self.light_theme else 0.45)
         if settings.axis_mode in ("auto_fixed", "manual_fixed") or not settings.axis_auto:
             if not is_bar and settings.x_min < settings.x_max:
                 axis.set_xlim(settings.x_min, settings.x_max)
@@ -1213,14 +1233,25 @@ class PlotWidget(QWidget):
         else:
             axis.set_aspect("auto")
 
+    def _display_series_color(self, color: str | None) -> str | None:
+        if self.light_theme and color == COLORS["md_series"]:
+            return "#111111"
+        return color
+
 
 class CombinedPlotWidget(QWidget):
-    def __init__(self, source_plots: list[PlotWidget], owns_source_plots: bool = False) -> None:
+    def __init__(
+        self,
+        source_plots: list[PlotWidget],
+        owns_source_plots: bool = False,
+        light_theme: bool = False,
+    ) -> None:
         super().__init__()
         self.figure = Figure(figsize=(8, 5), tight_layout=True, facecolor=COLORS["surface"])
         self.canvas = FigureCanvas(self.figure)
         self.source_plots = source_plots
         self.owns_source_plots = owns_source_plots
+        self.light_theme = light_theme
         self.settings = GraphSettings(**vars(source_plots[0].settings)) if source_plots else GraphSettings()
         self.settings.image_height = min(30.0, max(self.settings.image_height, self.settings.image_height * max(1, len(source_plots))))
         self._last_plot = source_plots[0]._last_plot if source_plots else None
@@ -1238,7 +1269,7 @@ class CombinedPlotWidget(QWidget):
             return
         axes = self.figure.subplots(len(self.source_plots), 1, squeeze=False)
         for axis, plot in zip(axes[:, 0], self.source_plots):
-            _draw_plot_on_axis(plot, axis, self._settings_for_source_plot(plot))
+            _draw_plot_on_axis(plot, axis, self._settings_for_source_plot(plot), self.light_theme)
         self.figure.tight_layout()
         self.canvas.draw_idle()
 
@@ -1255,14 +1286,23 @@ class CombinedPlotWidget(QWidget):
         return settings
 
     def save_png(self, path: Path) -> None:
-        self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
-        self.figure.tight_layout()
-        self.figure.savefig(
-            path,
-            dpi=self.settings.dpi,
-            transparent=self.settings.transparent,
-            bbox_inches="tight",
-        )
+        original_theme = self.light_theme
+        self.light_theme = True
+        try:
+            self.redraw()
+            self.figure.set_size_inches(self.settings.image_width, self.settings.image_height, forward=False)
+            self.figure.tight_layout()
+            self.figure.savefig(
+                path,
+                dpi=self.settings.dpi,
+                transparent=self.settings.transparent,
+                facecolor="white",
+                edgecolor="white",
+                bbox_inches="tight",
+            )
+        finally:
+            self.light_theme = original_theme
+            self.redraw()
 
     def closeEvent(self, event) -> None:
         if self.owns_source_plots:
@@ -1299,8 +1339,10 @@ class GraphPngPreviewDialog(QDialog):
             if len(plots) == 1:
                 preview = PlotWidget()
                 preview.copy_plot_state_from(plots[0])
+                preview.light_theme = True
+                preview.redraw()
             else:
-                preview = CombinedPlotWidget(plots)
+                preview = CombinedPlotWidget(plots, light_theme=True)
             self.preview_widgets.append(preview)
         self.preview_plot: PlotWidget | CombinedPlotWidget = self.preview_widgets[0]
 
@@ -3719,7 +3761,7 @@ class MainWindow(QMainWindow):
                     em_times,
                     md_evaporated_masses,
                     style="scatter",
-                    color="#111111",
+                    color=COLORS["md_series"],
                     marker="o",
                 )
             )
@@ -3729,7 +3771,7 @@ class MainWindow(QMainWindow):
                     radius_times,
                     md_equivalent_radii,
                     style="scatter",
-                    color="#111111",
+                    color=COLORS["md_series"],
                     marker="o",
                 )
             )
@@ -4229,7 +4271,9 @@ class MainWindow(QMainWindow):
         if self.theory_show_md_check.isChecked():
             values = comparison.md_evaporated_masses if value_kind == "em" else comparison.md_equivalent_radii
             x_values, y_values = _clip_xy_to_evaporation(result, comparison.times, values)
-            series_list.append(PlotSeries("MD", x_values, y_values, style="scatter", color="#111111", marker="o"))
+            series_list.append(
+                PlotSeries("MD", x_values, y_values, style="scatter", color=COLORS["md_series"], marker="o")
+            )
         alpha_colors = {0.8: "#1f77b4", 0.9: "#ff7f0e", 1.0: "#2ca02c"}
         for alpha, checkbox in self.theory_alpha_checks.items():
             if not checkbox.isChecked():
@@ -4430,13 +4474,20 @@ def _padded_value_range(values: list[float]) -> tuple[float, float] | None:
     return lower, upper
 
 
-def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
+def _draw_plot_on_axis(
+    plot: PlotWidget,
+    axis,
+    settings: GraphSettings,
+    light_theme: bool = False,
+) -> None:
     if plot._last_plot is None:
         axis.set_axis_off()
         return
     kind, title, x_label, y_label, x, y = plot._last_plot
     original_settings = plot.settings
+    original_theme = plot.light_theme
     plot.settings = settings
+    plot.light_theme = light_theme
     try:
         if kind == "xy":
             axis.scatter(
@@ -4462,7 +4513,7 @@ def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
                         item.x,
                         item.y,
                         label=item.label,
-                        color=item.color,
+                        color=plot._display_series_color(item.color),
                         linestyle=item.linestyle,
                         linewidth=item.linewidth,
                         alpha=settings.point_alpha,
@@ -4473,7 +4524,7 @@ def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
                         item.y,
                         label=item.label,
                         s=settings.point_size,
-                        c=item.color or settings.point_color,
+                        c=plot._display_series_color(item.color) or settings.point_color,
                         alpha=settings.point_alpha,
                         marker=item.marker or settings.marker,
                     )
@@ -4484,6 +4535,7 @@ def _draw_plot_on_axis(plot: PlotWidget, axis, settings: GraphSettings) -> None:
             plot._apply_common_style(axis, "", "", title)
     finally:
         plot.settings = original_settings
+        plot.light_theme = original_theme
 
 
 def _quality_label_for_dpi(dpi: int) -> str:

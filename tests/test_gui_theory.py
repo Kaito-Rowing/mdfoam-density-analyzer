@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 
+from PIL import Image
+
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -196,6 +198,8 @@ class GuiTheorySettingsTests(unittest.TestCase):
             window.tabs.setCurrentWidget(window.theory_tab)
             for plot in (window.theory_em_plot, window.theory_radius_plot):
                 self.assertIsNotNone(plot._last_series)
+                md_series = next(series for series in plot._last_series[3] if series.label == "MD")
+                self.assertEqual(md_series.color, "#f2f5f3")
                 for series in plot._last_series[3]:
                     self.assertTrue(all(time <= 2.0 for time in series.x))
 
@@ -243,6 +247,8 @@ class GuiTheorySettingsTests(unittest.TestCase):
             try:
                 self.assertIsNotNone(dialog.source_combo)
                 self.assertEqual(dialog.preview_plot._last_plot[1], "first")
+                self.assertEqual(dialog.preview_plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
+                self.assertEqual(dialog.preview_plot.figure.axes[0].get_facecolor()[:3], (1.0, 1.0, 1.0))
                 dialog.source_combo.setCurrentIndex(1)
                 self.assertEqual(dialog.preview_plot._last_plot[1], "second")
                 dialog.source_combo.setCurrentIndex(2)
@@ -254,11 +260,28 @@ class GuiTheorySettingsTests(unittest.TestCase):
                     dialog.preview_plot.save_png(output_path)
                     self.assertTrue(output_path.is_file())
                     self.assertGreater(output_path.stat().st_size, 0)
+                    with Image.open(output_path) as image:
+                        self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 255, 255))
             finally:
                 dialog.close()
         finally:
             first.close()
             second.close()
+
+    def test_png_export_uses_print_theme_and_restores_dark_canvas(self) -> None:
+        plot = PlotWidget()
+        try:
+            plot.plot_xy("title", "x", "y", [0.0, 1.0], [1.0, 2.0])
+            self.assertNotEqual(plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
+            with tempfile.TemporaryDirectory() as directory:
+                output_path = Path(directory) / "plot.png"
+                plot.save_png(output_path)
+                with Image.open(output_path) as image:
+                    self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 255, 255))
+            self.assertFalse(plot.light_theme)
+            self.assertNotEqual(plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
+        finally:
+            plot.close()
 
     def test_graph_axes_are_fixed_across_cases_and_manual_mode_overrides(self) -> None:
         window = MainWindow()
