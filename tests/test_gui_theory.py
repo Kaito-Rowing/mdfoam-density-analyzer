@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 
+from PIL import Image
+
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -20,7 +22,13 @@ except ImportError as exc:
     raise unittest.SkipTest(f"PySide6 GUI runtime is unavailable: {exc}") from exc
 
 from mdfoam_analyzer.analysis import CaseResult, TimeResult
-from mdfoam_analyzer.gui import CombinedPlotWidget, GraphPngPreviewDialog, MainWindow, PlotWidget
+from mdfoam_analyzer.gui import (
+    PNG_PREVIEW_PIXELS_PER_INCH,
+    CombinedPlotWidget,
+    GraphPngPreviewDialog,
+    MainWindow,
+    PlotWidget,
+)
 from mdfoam_analyzer.theory import evaporation_flux
 
 
@@ -86,6 +94,102 @@ class GuiTheorySettingsTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_dashboard_sidebar_controls_pages_and_log_drawer(self) -> None:
+        window = MainWindow()
+        try:
+            self.assertTrue(window.workflow_tabs.tabBar().isHidden())
+            self.assertTrue(window.input_nav_button.isChecked())
+            self.assertEqual(window.workflow_tabs.currentIndex(), 0)
+            self.assertTrue(window.log_group.isHidden())
+
+            window.settings_nav_button.click()
+            self.assertEqual(window.workflow_tabs.currentIndex(), 1)
+            self.assertTrue(window.settings_nav_button.isChecked())
+
+            window.workflow_tabs.setCurrentIndex(2)
+            self.assertTrue(window.results_nav_button.isChecked())
+            self.assertEqual(window.page_title_label.text(), window.workflow_tabs.tabText(2))
+
+            window.log_toggle_button.click()
+            self.assertFalse(window.log_group.isHidden())
+            window.log_toggle_button.click()
+            self.assertTrue(window.log_group.isHidden())
+        finally:
+            window.close()
+
+    def test_dashboard_control_panels_collapse_and_expand(self) -> None:
+        window = MainWindow()
+        try:
+            self.assertFalse(window.graph_settings_group.isChecked())
+            self.assertEqual(window.graph_settings_group.maximumHeight(), 34)
+            window.graph_settings_group.setChecked(True)
+            self.assertGreater(window.graph_settings_group.maximumHeight(), 1000)
+
+            self.assertFalse(window.visual_settings_group.isChecked())
+            window.visual_settings_group.setChecked(True)
+            self.assertGreater(window.visual_settings_group.maximumHeight(), 1000)
+        finally:
+            window.close()
+
+    def test_dashboard_can_shrink_to_small_desktop_size(self) -> None:
+        window = MainWindow()
+        try:
+            window.resize(1024, 720)
+            window.show()
+            self.app.processEvents()
+            self.assertLessEqual(window.width(), 1024)
+            self.assertLessEqual(window.height(), 720)
+            self.assertTrue(window.workflow_tabs.isVisible())
+        finally:
+            window.close()
+
+    def test_input_and_settings_use_compact_responsive_layout(self) -> None:
+        window = MainWindow()
+        try:
+            window.resize(1400, 900)
+            window.show()
+            self.app.processEvents()
+            self.assertLessEqual(window.input_content.maximumWidth(), 1120)
+            self.assertEqual(window.source_stack.maximumHeight(), 150)
+            self.assertLessEqual(window.threshold_spin.maximumWidth(), 360)
+            self.assertLessEqual(window.theory_rho_l_spin.maximumWidth(), 360)
+            advanced_index = window.settings_grid.indexOf(window.advanced_group)
+            self.assertEqual(window.settings_grid.getItemPosition(advanced_index)[:2], (0, 1))
+
+            window.resize(1024, 720)
+            self.app.processEvents()
+            advanced_index = window.settings_grid.indexOf(window.advanced_group)
+            theory_index = window.settings_grid.indexOf(window.theory_group)
+            self.assertEqual(window.settings_grid.getItemPosition(advanced_index)[:2], (1, 0))
+            self.assertEqual(window.settings_grid.getItemPosition(theory_index)[:2], (3, 0))
+
+            window.source_combo.setCurrentIndex(window.source_combo.findData("ssh"))
+            self.assertGreater(window.source_stack.maximumHeight(), 1000)
+        finally:
+            window.close()
+
+    def test_dashboard_kpis_follow_selected_result(self) -> None:
+        window = MainWindow()
+        try:
+            result = CaseResult(
+                case_name="case_dashboard",
+                case_dir=Path(),
+                status="ok",
+                evaporation_time=2.5,
+                rows=[TimeResult(0.0, 3.0, 1.0, 1, 1, contact_angle_deg=82.0)],
+            )
+            window.results.append(result)
+            window.add_result_row(result)
+            window.table.setCurrentCell(0, 0)
+            window.update_selected_case_plots()
+
+            self.assertEqual(window.kpi_case_value.text(), "case_dashboard")
+            self.assertEqual(window.kpi_volume_value.text(), "3")
+            self.assertEqual(window.kpi_evaporation_value.text(), "2.5")
+            self.assertEqual(window.kpi_contact_value.text(), "82")
+        finally:
+            window.close()
+
     def test_time_plots_are_clipped_at_evaporation_time(self) -> None:
         window = MainWindow()
         try:
@@ -125,6 +229,8 @@ class GuiTheorySettingsTests(unittest.TestCase):
             window.tabs.setCurrentWidget(window.theory_tab)
             for plot in (window.theory_em_plot, window.theory_radius_plot):
                 self.assertIsNotNone(plot._last_series)
+                md_series = next(series for series in plot._last_series[3] if series.label == "MD")
+                self.assertEqual(md_series.color, "#f2f5f3")
                 for series in plot._last_series[3]:
                     self.assertTrue(all(time <= 2.0 for time in series.x))
 
@@ -172,6 +278,27 @@ class GuiTheorySettingsTests(unittest.TestCase):
             try:
                 self.assertIsNotNone(dialog.source_combo)
                 self.assertEqual(dialog.preview_plot._last_plot[1], "first")
+                self.assertEqual(dialog.preview_plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
+                self.assertEqual(dialog.preview_plot.figure.axes[0].get_facecolor()[:3], (1.0, 1.0, 1.0))
+                expected_size = (
+                    round(dialog.width_spin.value() * PNG_PREVIEW_PIXELS_PER_INCH),
+                    round(dialog.height_spin.value() * PNG_PREVIEW_PIXELS_PER_INCH),
+                )
+                self.assertEqual(
+                    (dialog.preview_plot.width(), dialog.preview_plot.height()),
+                    expected_size,
+                )
+                dialog.resize(1400, 900)
+                self.app.processEvents()
+                self.assertEqual(
+                    (dialog.preview_plot.width(), dialog.preview_plot.height()),
+                    expected_size,
+                )
+                dialog.width_spin.setValue(9.0)
+                self.assertEqual(
+                    dialog.preview_plot.width(),
+                    round(9.0 * PNG_PREVIEW_PIXELS_PER_INCH),
+                )
                 dialog.source_combo.setCurrentIndex(1)
                 self.assertEqual(dialog.preview_plot._last_plot[1], "second")
                 dialog.source_combo.setCurrentIndex(2)
@@ -183,11 +310,28 @@ class GuiTheorySettingsTests(unittest.TestCase):
                     dialog.preview_plot.save_png(output_path)
                     self.assertTrue(output_path.is_file())
                     self.assertGreater(output_path.stat().st_size, 0)
+                    with Image.open(output_path) as image:
+                        self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 255, 255))
             finally:
                 dialog.close()
         finally:
             first.close()
             second.close()
+
+    def test_png_export_uses_print_theme_and_restores_dark_canvas(self) -> None:
+        plot = PlotWidget()
+        try:
+            plot.plot_xy("title", "x", "y", [0.0, 1.0], [1.0, 2.0])
+            self.assertNotEqual(plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
+            with tempfile.TemporaryDirectory() as directory:
+                output_path = Path(directory) / "plot.png"
+                plot.save_png(output_path)
+                with Image.open(output_path) as image:
+                    self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 255, 255))
+            self.assertFalse(plot.light_theme)
+            self.assertNotEqual(plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
+        finally:
+            plot.close()
 
     def test_graph_axes_are_fixed_across_cases_and_manual_mode_overrides(self) -> None:
         window = MainWindow()
