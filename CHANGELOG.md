@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 This project follows a lightweight changelog format. Version numbers are intended to follow semantic versioning once release artifacts are published.
 
+## [Unreleased]
+
+### Added
+
+- Versioned analysis-settings save/load through `mdfoam_project.json`.
+- Reproducibility manifests containing application version, analysis settings, input file metadata, mesh statistics, and per-case result summaries.
+- Automatic `analysis_manifest.json` inclusion in CSV export folders.
+
 ## [0.1.1] - 2026-06-04
 
 ### Added

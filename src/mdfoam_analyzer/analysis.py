@@ -54,6 +54,31 @@ class TimeResult:
     contact_fit_point_count: int = 0
 
 
+@dataclass
+class InputFileRecord:
+    relative_path: str
+    source_path: str
+    size: int
+    mtime: float
+
+
+@dataclass(frozen=True)
+class MeshStatistics:
+    mesh_count: int
+    cell_count: int
+    volume_mode: str
+    min_cell_volume: float
+    max_cell_volume: float
+    total_cell_volume: float
+    unique_volume_count: int
+    point_bounds: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ] | None
+    cell_centers_available: bool
+
+
 @dataclass(frozen=True)
 class ContactFitDiagnostics:
     raw_points: np.ndarray
@@ -80,6 +105,9 @@ class CaseResult:
     volume_mode: str = ""
     field_class: str = ""
     contact_average_percent: float = 100.0
+    source_case_path: str = ""
+    input_files: list[InputFileRecord] = field(default_factory=list)
+    mesh_statistics: MeshStatistics | None = None
 
     @property
     def time_count(self) -> int:
@@ -164,6 +192,7 @@ def analyze_case(
         case_dir=case_dir,
         status="running",
         contact_average_percent=settings.contact_average_percent,
+        source_case_path=str(case_dir.resolve()),
     )
     main_dir = case_dir / "main"
     if not main_dir.is_dir():
@@ -174,17 +203,27 @@ def analyze_case(
     try:
         reconstructed = _analyze_reconstructed(main_dir, settings, stop_requested, log)
         if reconstructed:
-            rows, mesh_info, field_class = reconstructed
+            rows, mesh_info, field_class, input_paths = reconstructed
             result.rows = rows
             result.mesh_source = mesh_info.source
             result.volume_mode = _volume_mode_label(mesh_info)
             result.field_class = field_class
+            result.mesh_statistics = _mesh_statistics([mesh_info], result.volume_mode)
         else:
-            rows, source, field_class = _analyze_processors(main_dir, settings, stop_requested, log)
+            rows, source, field_class, input_paths, mesh_infos = _analyze_processors(
+                main_dir, settings, stop_requested, log
+            )
             result.rows = rows
             result.mesh_source = source
             result.volume_mode = "processor meshes"
             result.field_class = field_class
+            if mesh_infos:
+                result.mesh_statistics = _mesh_statistics(
+                    mesh_infos,
+                    _processor_volume_mode(mesh_infos),
+                )
+
+        result.input_files = _input_file_records(case_dir, input_paths)
 
         if stop_requested():
             result.status = "stopped"
@@ -209,7 +248,7 @@ def _analyze_reconstructed(
     settings: AnalysisSettings,
     stop_requested,
     log,
-) -> tuple[list[TimeResult], MeshVolumeInfo, str] | None:
+) -> tuple[list[TimeResult], MeshVolumeInfo, str, list[Path]] | None:
     time_dirs = [
         (time_value, time_dir)
         for time_value, time_dir in numeric_time_dirs(main_dir)
@@ -225,12 +264,16 @@ def _analyze_reconstructed(
             f"{settings.density_field} is {field_info.field_class}; expected volScalarField"
         )
 
-    mesh_info = _read_or_build_volumes(main_dir / "constant" / "polyMesh", settings, field_info.value_count)
+    poly_mesh_dir = main_dir / "constant" / "polyMesh"
+    mesh_info = _read_or_build_volumes(poly_mesh_dir, settings, field_info.value_count)
+    input_paths = _mesh_input_paths(poly_mesh_dir, mesh_info)
     rows: list[TimeResult] = []
     for time_value, time_dir in time_dirs:
         if stop_requested():
             break
-        densities = read_scalar_internal_field(time_dir / settings.density_field)
+        density_path = time_dir / settings.density_field
+        densities = read_scalar_internal_field(density_path)
+        input_paths.append(density_path)
         rows.append(
             _volume_for_time(
                 time_value,
@@ -240,7 +283,7 @@ def _analyze_reconstructed(
             )
         )
     log(f"{main_dir.parent.name}: 再構成済み時刻フィールド={len(rows)}")
-    return rows, mesh_info, field_info.field_class or ""
+    return rows, mesh_info, field_info.field_class or "", input_paths
 
 
 def _analyze_processors(
@@ -248,12 +291,14 @@ def _analyze_processors(
     settings: AnalysisSettings,
     stop_requested,
     log,
-) -> tuple[list[TimeResult], str, str]:
+) -> tuple[list[TimeResult], str, str, list[Path], list[MeshVolumeInfo]]:
     processors = sorted(path for path in main_dir.glob("processor*") if path.is_dir())
     if not processors:
-        return [], "", ""
+        return [], "", "", [], []
 
     proc_data = []
+    input_paths: list[Path] = []
+    mesh_infos: list[MeshVolumeInfo] = []
     all_times: set[float] = set()
     field_class = ""
     for processor in processors:
@@ -277,6 +322,10 @@ def _analyze_processors(
             field_info.value_count,
         )
         proc_data.append((processor, time_dirs, mesh_info))
+        mesh_infos.append(mesh_info)
+        input_paths.extend(
+            _mesh_input_paths(processor / "constant" / "polyMesh", mesh_info)
+        )
         all_times.update(time_dirs.keys())
 
     rows: list[TimeResult] = []
@@ -294,7 +343,9 @@ def _analyze_processors(
             time_dir = time_dirs.get(time_value)
             if not time_dir:
                 continue
-            densities = read_scalar_internal_field(time_dir / settings.density_field)
+            density_path = time_dir / settings.density_field
+            densities = read_scalar_internal_field(density_path)
+            input_paths.append(density_path)
             stats = _selected_volume_stats(
                 densities,
                 mesh_info.volumes,
@@ -330,7 +381,13 @@ def _analyze_processors(
         )
 
     log(f"{main_dir.parent.name}: processor分割時刻フィールド={len(rows)}")
-    return rows, f"{len(proc_data)} processor meshes", field_class
+    return (
+        rows,
+        f"{len(proc_data)} processor meshes",
+        field_class,
+        input_paths,
+        mesh_infos,
+    )
 
 
 def _read_or_build_volumes(
@@ -369,6 +426,77 @@ def _volume_mode_label(mesh_info: MeshVolumeInfo) -> str:
     if mesh_info.is_constant:
         return "mesh constant cell volume"
     return f"mesh per-cell volumes ({mesh_info.unique_volume_count} unique)"
+
+
+def _processor_volume_mode(mesh_infos: list[MeshVolumeInfo]) -> str:
+    manual_count = sum(
+        info.source == "manual cell volume" for info in mesh_infos
+    )
+    if manual_count == len(mesh_infos):
+        return "processor manual constant cell volumes"
+    if manual_count:
+        return "processor mixed mesh and manual cell volumes"
+    if all(info.is_constant for info in mesh_infos):
+        return "processor mesh constant cell volumes"
+    return "processor mesh per-cell volumes"
+
+
+def _mesh_input_paths(poly_mesh_dir: Path, mesh_info: MeshVolumeInfo) -> list[Path]:
+    if mesh_info.source == "manual cell volume":
+        return []
+    return [
+        path
+        for path in (
+            poly_mesh_dir / "points",
+            poly_mesh_dir / "faces",
+            poly_mesh_dir / "owner",
+            poly_mesh_dir / "neighbour",
+        )
+        if path.is_file()
+    ]
+
+
+def _input_file_records(case_dir: Path, paths: list[Path]) -> list[InputFileRecord]:
+    records: list[InputFileRecord] = []
+    seen: set[Path] = set()
+    resolved_case = case_dir.resolve()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen or not resolved.is_file():
+            continue
+        seen.add(resolved)
+        stat = resolved.stat()
+        records.append(
+            InputFileRecord(
+                relative_path=resolved.relative_to(resolved_case).as_posix(),
+                source_path=str(resolved),
+                size=stat.st_size,
+                mtime=stat.st_mtime,
+            )
+        )
+    return sorted(records, key=lambda item: item.relative_path)
+
+
+def _mesh_statistics(
+    mesh_infos: list[MeshVolumeInfo],
+    volume_mode: str,
+) -> MeshStatistics:
+    all_volumes = [volume for info in mesh_infos for volume in info.volumes]
+    return MeshStatistics(
+        mesh_count=len(mesh_infos),
+        cell_count=len(all_volumes),
+        volume_mode=volume_mode,
+        min_cell_volume=min(all_volumes),
+        max_cell_volume=max(all_volumes),
+        total_cell_volume=sum(all_volumes),
+        unique_volume_count=len({round(value, 34) for value in all_volumes}),
+        point_bounds=_combined_point_bounds(
+            info.point_bounds for info in mesh_infos
+        ),
+        cell_centers_available=all(
+            info.cell_centers is not None for info in mesh_infos
+        ),
+    )
 
 
 @dataclass(frozen=True)

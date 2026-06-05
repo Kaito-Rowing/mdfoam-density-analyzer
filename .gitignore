@@ -22,6 +22,8 @@ log.mapFields
 # Local exports
 mdfoam_summary.csv
 mdfoam_timeseries.csv
+mdfoam_project.json
+analysis_manifest.json
 *.png
 !docs/screenshots/*.png
 Sesshoku6.py

@@ -69,6 +69,14 @@ from .analysis import (
     write_timeseries_csv,
 )
 from .cache import clear_cache
+from .provenance import (
+    ProvenanceError,
+    RunContext,
+    apply_remote_input_paths,
+    load_analysis_settings,
+    save_analysis_settings,
+    write_analysis_manifest,
+)
 from .remote import (
     RemoteError,
     RemoteProfile,
@@ -771,6 +779,55 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
 }
 
+TRANSLATIONS["en"].update(
+    {
+        "解析設定を保存": "Save analysis settings",
+        "解析設定を読込": "Load analysis settings",
+        "解析記録を保存": "Save analysis record",
+        "解析設定を保存しました": "Analysis settings saved",
+        "解析設定を読み込みました": "Analysis settings loaded",
+        "解析記録を保存しました": "Analysis record saved",
+        "解析を実行してから保存してください。": "Run the analysis before saving.",
+        "解析記録の保存に失敗しました": "Failed to save analysis record",
+    }
+)
+TRANSLATIONS["zh"].update(
+    {
+        "解析設定を保存": "保存分析设置",
+        "解析設定を読込": "加载分析设置",
+        "解析記録を保存": "保存分析记录",
+        "解析設定を保存しました": "已保存分析设置",
+        "解析設定を読み込みました": "已加载分析设置",
+        "解析記録を保存しました": "已保存分析记录",
+        "解析を実行してから保存してください。": "请先运行分析再保存。",
+        "解析記録の保存に失敗しました": "保存分析记录失败",
+    }
+)
+TRANSLATIONS["es"].update(
+    {
+        "解析設定を保存": "Guardar ajustes de análisis",
+        "解析設定を読込": "Cargar ajustes de análisis",
+        "解析記録を保存": "Guardar registro de análisis",
+        "解析設定を保存しました": "Ajustes de análisis guardados",
+        "解析設定を読み込みました": "Ajustes de análisis cargados",
+        "解析記録を保存しました": "Registro de análisis guardado",
+        "解析を実行してから保存してください。": "Ejecute el análisis antes de guardar.",
+        "解析記録の保存に失敗しました": "No se pudo guardar el registro de análisis",
+    }
+)
+TRANSLATIONS["hi"].update(
+    {
+        "解析設定を保存": "विश्लेषण सेटिंग सहेजें",
+        "解析設定を読込": "विश्लेषण सेटिंग लोड करें",
+        "解析記録を保存": "विश्लेषण रिकॉर्ड सहेजें",
+        "解析設定を保存しました": "विश्लेषण सेटिंग सहेजी गई",
+        "解析設定を読み込みました": "विश्लेषण सेटिंग लोड की गई",
+        "解析記録を保存しました": "विश्लेषण रिकॉर्ड सहेजा गया",
+        "解析を実行してから保存してください。": "सहेजने से पहले विश्लेषण चलाएं।",
+        "解析記録の保存に失敗しました": "विश्लेषण रिकॉर्ड सहेजा नहीं जा सका",
+    }
+)
+
 THREE_D_AUTO_MAX_POINTS = 50_000
 QUALITY_DPI_OPTIONS = {
     "低 150dpi": 150,
@@ -1012,6 +1069,11 @@ class AnalyzerWorker(QObject):
                         stop_requested=lambda: self._stop_requested,
                         log=self.log.emit,
                     )
+                    apply_remote_input_paths(
+                        result,
+                        local_case / ".mdfoam_remote_manifest.json",
+                        remote_case,
+                    )
                 except Exception as exc:
                     result = CaseResult(
                         case_name=remote_name(remote_case),
@@ -1019,6 +1081,7 @@ class AnalyzerWorker(QObject):
                         status="error",
                         error=str(exc),
                         contact_average_percent=self.settings.contact_average_percent,
+                        source_case_path=remote_case,
                     )
                 self.case_finished.emit(result)
                 self.progress.emit(index, total)
@@ -2122,6 +2185,8 @@ class MainWindow(QMainWindow):
         self.remote_browser_path = ""
         self._last_visual_downsample_message = ""
         self.results: list[CaseResult] = []
+        self._last_run_settings: AnalysisSettings | None = None
+        self._last_run_context: RunContext | None = None
         self._theory_comparison_cache: dict[tuple[int, TheorySettings], TheoryComparison] = {}
         self._auto_axis_ranges: dict[str, tuple[float, float, float, float]] = {}
         self.worker: AnalyzerWorker | None = None
@@ -2490,6 +2555,13 @@ class MainWindow(QMainWindow):
         run_group = QGroupBox("実行")
         run_group.setMaximumWidth(1120)
         run_layout = QVBoxLayout(run_group)
+        project_row = QHBoxLayout()
+        self.save_settings_button = QPushButton("解析設定を保存")
+        self.load_settings_button = QPushButton("解析設定を読込")
+        project_row.addWidget(self.save_settings_button)
+        project_row.addWidget(self.load_settings_button)
+        project_row.addStretch(1)
+        run_layout.addLayout(project_row)
         button_row = QHBoxLayout()
         self.run_button = QPushButton("解析実行")
         self.run_button.setProperty("variant", "primary")
@@ -2513,10 +2585,13 @@ class MainWindow(QMainWindow):
         self.workflow_tabs.addTab(results_tab, "結果")
 
         export_row = QHBoxLayout()
+        self.export_manifest_button = QPushButton("解析記録を保存")
+        self.export_manifest_button.setEnabled(False)
         self.export_csv_button = QPushButton("CSV出力")
         self.export_png_button = QPushButton("PNG出力")
         self.export_all_png_button = QPushButton("全ケースPNG出力")
         export_row.addStretch(1)
+        export_row.addWidget(self.export_manifest_button)
         export_row.addWidget(self.export_csv_button)
         export_row.addWidget(self.export_png_button)
         export_row.addWidget(self.export_all_png_button)
@@ -2855,8 +2930,11 @@ class MainWindow(QMainWindow):
         self.remote_dir_list.itemDoubleClicked.connect(lambda _: self.remote_open_selected())
         self.remote_select_button.clicked.connect(self.remote_select_current)
         self.clear_cache_button.clicked.connect(self.clear_remote_cache)
+        self.save_settings_button.clicked.connect(self.save_analysis_settings_file)
+        self.load_settings_button.clicked.connect(self.load_analysis_settings_file)
         self.run_button.clicked.connect(self.start_analysis)
         self.stop_button.clicked.connect(self.stop_analysis)
+        self.export_manifest_button.clicked.connect(self.export_analysis_manifest)
         self.export_csv_button.clicked.connect(self.export_csv)
         self.export_png_button.clicked.connect(self.export_png)
         self.export_all_png_button.clicked.connect(self.export_all_png)
@@ -3071,6 +3149,10 @@ class MainWindow(QMainWindow):
 
     def _clear_results(self) -> None:
         self.results.clear()
+        self._last_run_settings = None
+        self._last_run_context = None
+        if hasattr(self, "export_manifest_button"):
+            self.export_manifest_button.setEnabled(False)
         self._theory_comparison_cache.clear()
         self._auto_axis_ranges.clear()
         self.table.setRowCount(0)
@@ -3341,6 +3423,62 @@ class MainWindow(QMainWindow):
             contact_average_percent=self.contact_average_percent_spin.value(),
         )
 
+    def apply_analysis_settings(self, settings: AnalysisSettings) -> None:
+        field_index = self.field_combo.findText(settings.density_field)
+        if field_index < 0:
+            self.field_combo.addItem(settings.density_field)
+            field_index = self.field_combo.findText(settings.density_field)
+        self.field_combo.setCurrentIndex(field_index)
+        self.threshold_spin.setValue(settings.density_threshold)
+        self.zero_spin.setValue(settings.zero_tolerance)
+        self.zero_count_spin.setValue(settings.consecutive_zero_count)
+        self.cell_volume_spin.setValue(settings.manual_cell_volume or 0.0)
+        self.dx_spin.setValue(settings.dx or 0.0)
+        self.dy_spin.setValue(settings.dy or 0.0)
+        self.dz_spin.setValue(settings.dz or 0.0)
+        self.contact_fit_lower_spin.setValue(settings.contact_fit_lower)
+        self.contact_fit_upper_spin.setValue(settings.contact_fit_upper)
+        self.contact_unwrap_check.setChecked(settings.contact_unwrap_xy)
+        self.contact_average_percent_spin.setValue(
+            settings.contact_average_percent
+        )
+
+    @Slot()
+    def save_analysis_settings_file(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.t("解析設定を保存"),
+            str(Path(self._local_dialog_start_dir()) / "mdfoam_project.json"),
+            "JSON (*.json)",
+        )
+        if not path:
+            return
+        output_path = _ensure_suffix(Path(path), ".json")
+        try:
+            save_analysis_settings(output_path, self.settings())
+        except ProvenanceError as exc:
+            QMessageBox.warning(self, self.t("解析設定を保存"), str(exc))
+            return
+        self.log(f"{self.t('解析設定を保存しました')}: {output_path}")
+
+    @Slot()
+    def load_analysis_settings_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.t("解析設定を読込"),
+            self._local_dialog_start_dir(),
+            "JSON (*.json)",
+        )
+        if not path:
+            return
+        try:
+            loaded = load_analysis_settings(Path(path))
+        except ProvenanceError as exc:
+            QMessageBox.warning(self, self.t("解析設定を読込"), str(exc))
+            return
+        self.apply_analysis_settings(loaded)
+        self.log(f"{self.t('解析設定を読み込みました')}: {path}")
+
     def theory_settings(self) -> TheorySettings:
         v0_source = _combo_data(self.theory_v0_source_combo, "max_volume")
         theta_source = _combo_data(self.theory_theta_source_combo, "average")
@@ -3443,6 +3581,24 @@ class MainWindow(QMainWindow):
                 return
 
         self._clear_results()
+        run_settings = self.settings()
+        if remote_profile is None:
+            run_context = RunContext(
+                input_mode="local",
+                selected_root=str(self.local_folder_path.resolve()),
+                analysis_settings=run_settings,
+            )
+        else:
+            run_context = RunContext(
+                input_mode="ssh",
+                selected_root=normalize_remote_path(self.remote_path_edit.text()),
+                analysis_settings=run_settings,
+                remote_host=remote_profile.host,
+                remote_port=remote_profile.port,
+                remote_username=remote_profile.username,
+            )
+        self._last_run_settings = run_settings
+        self._last_run_context = run_context
         self.update_visual_controls(None)
         self.update_theory_plots(None)
         self.progress.setRange(0, len(cases))
@@ -3453,7 +3609,7 @@ class MainWindow(QMainWindow):
         self.workflow_tabs.setCurrentIndex(2)
 
         self.thread = QThread(self)
-        self.worker = AnalyzerWorker(cases, self.settings(), remote_profile)
+        self.worker = AnalyzerWorker(cases, run_settings, remote_profile)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.progress.connect(self.on_progress)
@@ -3648,6 +3804,7 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def on_case_finished(self, result: CaseResult) -> None:
         self.results.append(result)
+        self.export_manifest_button.setEnabled(True)
         self.add_result_row(result)
         self.update_common_axis_ranges()
         self.update_evap_plot()
@@ -4442,6 +4599,40 @@ class MainWindow(QMainWindow):
         else:
             self.evap_plot.clear("蒸発完了時刻")
 
+    def _write_current_manifest(self, path: Path) -> None:
+        if self._last_run_settings is None or self._last_run_context is None:
+            raise ProvenanceError("No completed analysis context is available")
+        write_analysis_manifest(
+            path,
+            self._last_run_context,
+            self.results,
+        )
+
+    @Slot()
+    def export_analysis_manifest(self) -> None:
+        if not self.results:
+            QMessageBox.information(
+                self,
+                self.t("解析記録を保存"),
+                self.t("解析を実行してから保存してください。"),
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.t("解析記録を保存"),
+            str(Path(self._local_dialog_start_dir()) / "analysis_manifest.json"),
+            "JSON (*.json)",
+        )
+        if not path:
+            return
+        output_path = _ensure_suffix(Path(path), ".json")
+        try:
+            self._write_current_manifest(output_path)
+        except ProvenanceError as exc:
+            QMessageBox.warning(self, self.t("解析記録を保存"), str(exc))
+            return
+        self.log(f"{self.t('解析記録を保存しました')}: {output_path}")
+
     @Slot()
     def export_csv(self) -> None:
         if not self.results:
@@ -4456,6 +4647,11 @@ class MainWindow(QMainWindow):
         theory_settings = self.theory_settings()
         write_theory_summary_csv(out_dir / "mdfoam_theory_summary.csv", self.results, theory_settings, DEFAULT_ALPHA_VALUES)
         write_theory_timeseries_csv(out_dir / "mdfoam_theory_timeseries.csv", self.results, theory_settings, DEFAULT_ALPHA_VALUES)
+        try:
+            self._write_current_manifest(out_dir / "analysis_manifest.json")
+        except ProvenanceError as exc:
+            QMessageBox.warning(self, self.t("解析記録を保存"), str(exc))
+            self.log(f"{self.t('解析記録の保存に失敗しました')}: {exc}")
         self.log(f"CSVを出力しました: {out_dir}")
 
     @Slot()
