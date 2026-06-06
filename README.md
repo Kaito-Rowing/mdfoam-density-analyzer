@@ -35,10 +35,10 @@ This desktop application reads mdFOAM/OpenFOAM-style simulation results directly
 
 If you use mdFOAM Density Analyzer in research, please cite the software using the metadata in [CITATION.cff](CITATION.cff).
 
-DOI: pending Zenodo archive for the next GitHub release.
+DOI: pending Zenodo archive.
 
 ```text
-Kaito Nakatani. mdFOAM Density Analyzer. Version 0.1.1. 2026.
+Kaito Nakatani. mdFOAM Density Analyzer. Version 0.2.1. 2026.
 https://github.com/Kaito-Rowing/mdfoam-density-analyzer
 ```
 

@@ -16,5 +16,5 @@ keywords:
 license: MIT
 repository-code: "https://github.com/Kaito-Rowing/mdfoam-density-analyzer"
 url: "https://github.com/Kaito-Rowing/mdfoam-density-analyzer"
-version: "0.1.1"
-date-released: "2026-06-04"
+version: "0.2.1"
+date-released: "2026-06-06"

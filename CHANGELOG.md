@@ -6,6 +6,8 @@ This project follows a lightweight changelog format. Version numbers are intende
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-06
+
 ### Added
 
 - Versioned analysis-settings save/load through `mdfoam_project.json`.
@@ -14,6 +16,14 @@ This project follows a lightweight changelog format. Version numbers are intende
 - SHA-256-verified local analysis caching for parsed density fields, mesh data,
   and complete case results.
 - A separate local analysis cache clear action and a 10 GB LRU cache limit.
+- Citation and Zenodo metadata for research software publication.
+
+### Changed
+
+- Redesigned the desktop interface as a dark scientific dashboard.
+- Improved PNG preview sizing, scrolling, export styling, and print-theme output.
+- Expanded README documentation with research context, workflow diagrams, and
+  application screenshots.
 
 ## [0.1.1] - 2026-06-04
 
