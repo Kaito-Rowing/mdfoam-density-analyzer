@@ -68,7 +68,8 @@ from .analysis import (
     write_summary_csv,
     write_timeseries_csv,
 )
-from .cache import clear_cache
+from .analysis_cache import AnalysisCacheSession
+from .cache import clear_cache, clear_local_analysis_cache
 from .provenance import (
     ProvenanceError,
     RunContext,
@@ -156,6 +157,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "開く": "Open",
         "このフォルダを選択": "Select this folder",
         "キャッシュ削除": "Clear cache",
+        "ローカル解析キャッシュ削除": "Clear local analysis cache",
         "ケース一覧": "Cases",
         "解析設定": "Analysis settings",
         "基本設定": "Basic settings",
@@ -318,6 +320,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "開く": "打开",
         "このフォルダを選択": "选择此文件夹",
         "キャッシュ削除": "清除缓存",
+        "ローカル解析キャッシュ削除": "清除本地分析缓存",
         "ケース一覧": "案例列表",
         "解析設定": "分析设置",
         "基本設定": "基本设置",
@@ -480,6 +483,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "開く": "Abrir",
         "このフォルダを選択": "Seleccionar esta carpeta",
         "キャッシュ削除": "Borrar caché",
+        "ローカル解析キャッシュ削除": "Borrar caché de análisis local",
         "ケース一覧": "Casos",
         "解析設定": "Ajustes de análisis",
         "基本設定": "Ajustes básicos",
@@ -642,6 +646,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "開く": "खोलें",
         "このフォルダを選択": "यह फ़ोल्डर चुनें",
         "キャッシュ削除": "कैश हटाएं",
+        "ローカル解析キャッシュ削除": "स्थानीय विश्लेषण कैश हटाएं",
         "ケース一覧": "केस",
         "解析設定": "विश्लेषण सेटिंग",
         "基本設定": "मूल सेटिंग",
@@ -1019,6 +1024,7 @@ class AnalyzerWorker(QObject):
                 return
 
             total = len(self.cases)
+            cache_session = AnalysisCacheSession(log=self.log.emit)
             for index, case in enumerate(self.cases, start=1):
                 if self._stop_requested:
                     self.log.emit("残りのケースを解析せずに停止しました。")
@@ -1029,6 +1035,7 @@ class AnalyzerWorker(QObject):
                     self.settings,
                     stop_requested=lambda: self._stop_requested,
                     log=self.log.emit,
+                    cache_session=cache_session,
                 )
                 self.case_finished.emit(result)
                 self.progress.emit(index, total)
@@ -2316,8 +2323,10 @@ class MainWindow(QMainWindow):
         local_group = QGroupBox("ローカルフォルダ")
         local_group_layout = QHBoxLayout(local_group)
         self.browse_button = QPushButton("フォルダを選択")
+        self.clear_local_cache_button = QPushButton("ローカル解析キャッシュ削除")
         local_group_layout.addWidget(QLabel("解析対象ケースを含むフォルダを選択します。"))
         local_group_layout.addStretch(1)
+        local_group_layout.addWidget(self.clear_local_cache_button)
         local_group_layout.addWidget(self.browse_button)
         local_layout.addWidget(local_group)
         self.source_stack.addWidget(local_panel)
@@ -2922,6 +2931,7 @@ class MainWindow(QMainWindow):
         self.language_combo.currentIndexChanged.connect(lambda _: self.apply_language(_combo_data(self.language_combo, "ja")))
         self.source_combo.currentIndexChanged.connect(lambda _: self._set_source_mode(_combo_data(self.source_combo, "local")))
         self.browse_button.clicked.connect(self.choose_folder)
+        self.clear_local_cache_button.clicked.connect(self.clear_local_cache)
         self.refresh_button.clicked.connect(self.refresh_source)
         self.key_browse_button.clicked.connect(self.choose_private_key)
         self.connect_remote_button.clicked.connect(self.connect_remote_browser)
@@ -3325,6 +3335,14 @@ class MainWindow(QMainWindow):
             self.log("SSH解析キャッシュを削除しました。")
         except Exception as exc:
             self.log(f"キャッシュ削除に失敗しました: {exc}")
+
+    @Slot()
+    def clear_local_cache(self) -> None:
+        try:
+            clear_local_analysis_cache()
+            self.log("ローカル解析キャッシュを削除しました。")
+        except Exception as exc:
+            self.log(f"ローカル解析キャッシュの削除に失敗しました: {exc}")
 
     @Slot()
     def choose_folder(self) -> None:

@@ -70,6 +70,7 @@ The contact angle workflow is designed to approximate a previous process where c
 - Exports summary CSV, time-series CSV, graph PNG files, visualization PNG files, and visualization GIF files.
 - Saves and reloads analysis settings as a versioned `mdfoam_project.json` file.
 - Exports a reproducibility-focused `analysis_manifest.json` with settings, input file metadata, mesh statistics, and result summaries.
+- Caches local mesh parsing, density arrays, and complete case results using SHA-256-verified input content.
 - Provides a PySide6 desktop GUI with case tables, plots, and visualization diagnostics.
 - UI language can be switched between Japanese, English, Chinese, Spanish, and Hindi.
 
@@ -224,6 +225,21 @@ analysis controls; it does not change the selected input or start analysis.
 PNG export supports the analysis graphs in the results tab. The visualization tab can export the current visual frame as PNG.
 
 GIF export is available from the visualization tab and uses the selected time range and FPS setting.
+
+## Local Analysis Cache
+
+Local analysis automatically caches parsed meshes, parsed density arrays, and
+complete case results in the user cache directory. Every analysis run hashes
+the full contents of the relevant OpenFOAM files with SHA-256 before reusing a
+cached value. Changes are therefore detected even when file size and
+modification time remain unchanged.
+
+Changing only the density threshold reuses the parsed density and mesh arrays
+but recalculates all metrics with the current settings. Corrupt or incompatible
+cache entries are ignored and recalculated. The cache is limited to 10 GB with
+least-recently-used cleanup and can be cleared from the local input panel.
+
+The SSH/SFTP download cache is separate from the local analysis cache.
 
 ## Visualization
 

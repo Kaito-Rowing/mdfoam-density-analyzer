@@ -11,6 +11,9 @@ This project follows a lightweight changelog format. Version numbers are intende
 - Versioned analysis-settings save/load through `mdfoam_project.json`.
 - Reproducibility manifests containing application version, analysis settings, input file metadata, mesh statistics, and per-case result summaries.
 - Automatic `analysis_manifest.json` inclusion in CSV export folders.
+- SHA-256-verified local analysis caching for parsed density fields, mesh data,
+  and complete case results.
+- A separate local analysis cache clear action and a 10 GB LRU cache limit.
 
 ## [0.1.1] - 2026-06-04
 
