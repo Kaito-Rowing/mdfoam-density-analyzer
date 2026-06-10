@@ -1,3 +1,62 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mdfoam-density-analyzer"
+dynamic = ["version"]
+description = "Desktop analyzer for mdFOAM/OpenFOAM density fields"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Kaito Nakatani" },
+]
+keywords = [
+    "mdFOAM",
+    "OpenFOAM",
+    "molecular simulation",
+    "droplet evaporation",
+    "contact angle",
+    "scientific software",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "PySide6>=6.7",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "paramiko>=3.4",
+    "keyring>=25.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Kaito-Rowing/mdfoam-density-analyzer"
+Repository = "https://github.com/Kaito-Rowing/mdfoam-density-analyzer"
+Issues = "https://github.com/Kaito-Rowing/mdfoam-density-analyzer/issues"
+
+[project.scripts]
+mdfoam-density-analyzer = "mdfoam_analyzer.gui:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mdfoam_analyzer.__version__" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

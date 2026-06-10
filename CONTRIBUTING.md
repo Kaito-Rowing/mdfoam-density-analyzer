@@ -9,10 +9,16 @@ This project is focused on reproducible quantitative post-processing for mdFOAM/
 Install dependencies:
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 Run the application:
+
+```powershell
+mdfoam-density-analyzer
+```
+
+The repository launcher is also available:
 
 ```powershell
 python app.py

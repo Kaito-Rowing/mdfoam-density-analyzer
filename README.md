@@ -76,17 +76,32 @@ The contact angle workflow is designed to approximate a previous process where c
 
 ## Installation
 
-Use Python 3.10 or newer if possible.
+Use Python 3.10 or newer. From a source checkout, install the application and
+its dependencies in editable mode:
+
+```powershell
+python -m pip install -e .
+```
+
+The legacy requirements entry point remains available and performs the same
+editable installation:
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-The main dependencies are PySide6, matplotlib, NumPy, Paramiko, and keyring.
+Runtime dependencies are declared in `pyproject.toml`. The main dependencies
+are PySide6, matplotlib, NumPy, Paramiko, and keyring.
 
 ## Quick Start
 
 Start the application:
+
+```powershell
+mdfoam-density-analyzer
+```
+
+The repository launchers remain available:
 
 ```powershell
 python app.py
