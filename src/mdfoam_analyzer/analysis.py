@@ -6,6 +6,7 @@ import csv
 import math
 import platform
 import sys
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -20,6 +21,9 @@ from .openfoam import (
     read_mesh_volumes,
     read_scalar_internal_field,
 )
+
+if TYPE_CHECKING:
+    from .molecular_departure import MolecularDepartureResult
 
 
 ANALYSIS_ALGORITHM_VERSION = 1
@@ -42,6 +46,12 @@ class AnalysisSettings:
     contact_fit_upper: float = 1.0
     contact_unwrap_xy: bool = True
     contact_average_percent: float = 100.0
+    departure_enabled: bool = False
+    departure_species: str = "water"
+    departure_cutoff: float = 4.0e-10
+    departure_confirmation_frames: int = 3
+    departure_height_bins: int = 10
+    departure_bin_mode: str = "equal_height"
 
     def fallback_cell_volume(self) -> float | None:
         if self.manual_cell_volume and self.manual_cell_volume > 0:
@@ -117,6 +127,7 @@ class CaseResult:
     source_case_path: str = ""
     input_files: list[InputFileRecord] = field(default_factory=list)
     mesh_statistics: MeshStatistics | None = None
+    departure_result: MolecularDepartureResult | None = None
 
     @property
     def time_count(self) -> int:
@@ -543,6 +554,9 @@ def analyze_case(
         fingerprints: dict[Path, FileFingerprint] = {}
         result_cache_key: str | None = None
         cache_hits_before = cache_session.hit_counts() if cache_session else (0, 0)
+        use_complete_result_cache = (
+            cache_session is not None and not settings.departure_enabled
+        )
         if cache_session is not None:
             input_paths = _cache_input_paths(main_dir, settings.density_field)
             fingerprints = cache_session.fingerprints(input_paths, stop_requested)
@@ -556,7 +570,11 @@ def analyze_case(
                 settings,
                 fingerprints,
             )
-            cached_result = cache_session.load_result(result_cache_key)
+            cached_result = (
+                cache_session.load_result(result_cache_key)
+                if use_complete_result_cache
+                else None
+            )
             if cached_result is not None:
                 try:
                     restored = _restore_case_result(
@@ -621,7 +639,42 @@ def analyze_case(
                 settings.consecutive_zero_count,
             )
             result.status = "ok"
-            if cache_session is not None and result_cache_key is not None:
+            if settings.departure_enabled:
+                from .molecular_departure import analyze_molecular_departures
+
+                departure_result = analyze_molecular_departures(
+                    case_dir,
+                    settings,
+                    result.evaporation_time,
+                    stop_requested=stop_requested,
+                    log=log,
+                )
+                result.departure_result = departure_result
+                if departure_result.warning:
+                    log(
+                        f"{case_dir.name}: molecular departure warning: "
+                        f"{departure_result.warning}"
+                    )
+                if departure_result.status == "error":
+                    log(
+                        f"{case_dir.name}: molecular departure error: "
+                        f"{departure_result.error}"
+                    )
+                result.input_files = _merge_input_file_records(
+                    result.input_files,
+                    _input_file_records(
+                        case_dir,
+                        departure_result.input_paths,
+                    ),
+                )
+                if departure_result.status == "stopped":
+                    result.status = "stopped"
+            if (
+                result.status == "ok"
+                and use_complete_result_cache
+                and cache_session is not None
+                and result_cache_key is not None
+            ):
                 metadata, arrays = _case_result_cache_payload(result)
                 cache_session.store_result(result_cache_key, metadata, arrays)
                 density_before, mesh_before = cache_hits_before
@@ -936,6 +989,15 @@ def _input_file_records(case_dir: Path, paths: list[Path]) -> list[InputFileReco
             )
         )
     return sorted(records, key=lambda item: item.relative_path)
+
+
+def _merge_input_file_records(
+    left: list[InputFileRecord],
+    right: list[InputFileRecord],
+) -> list[InputFileRecord]:
+    records = {record.relative_path: record for record in left}
+    records.update({record.relative_path: record for record in right})
+    return [records[key] for key in sorted(records)]
 
 
 def _mesh_statistics(
@@ -1291,6 +1353,10 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                 "mesh_source",
                 "volume_mode",
                 "field_class",
+                "departure_status",
+                "departure_raw_event_count",
+                "departure_confirmed_event_count",
+                "departure_excluded_height_count",
                 "error",
             ]
         )
@@ -1312,6 +1378,26 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                     result.mesh_source,
                     result.volume_mode,
                     result.field_class,
+                    (
+                        ""
+                        if result.departure_result is None
+                        else result.departure_result.status
+                    ),
+                    (
+                        ""
+                        if result.departure_result is None
+                        else result.departure_result.raw_event_count
+                    ),
+                    (
+                        ""
+                        if result.departure_result is None
+                        else result.departure_result.confirmed_event_count
+                    ),
+                    (
+                        ""
+                        if result.departure_result is None
+                        else result.departure_result.excluded_normalized_height_count
+                    ),
                     result.error,
                 ]
             )

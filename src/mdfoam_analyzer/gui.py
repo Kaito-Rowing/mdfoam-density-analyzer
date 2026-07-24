@@ -70,6 +70,10 @@ from .analysis import (
 )
 from .analysis_cache import AnalysisCacheSession
 from .cache import clear_cache, clear_local_analysis_cache
+from .molecular_departure import (
+    write_departure_events_csv,
+    write_departure_height_bins_csv,
+)
 from .provenance import (
     ProvenanceError,
     RunContext,
@@ -833,6 +837,216 @@ TRANSLATIONS["hi"].update(
     }
 )
 
+TRANSLATIONS["en"].update(
+    {
+        "分子離脱解析": "Molecular departure analysis",
+        "分子種": "Molecule species",
+        "クラスタ距離": "Cluster cutoff",
+        "確定連続時刻数": "Confirmation frames",
+        "高さビン数": "Height bins",
+        "高さビン方式": "Height binning",
+        "高さ等間隔": "Equal height",
+        "球面表面積等分": "Equal fitted surface area",
+        "分布表示": "Distribution metric",
+        "イベント件数": "Event count",
+        "面積時間あたり": "Per area-time",
+        "分子離脱高さ分布": "Molecular departure height",
+        "分子離脱 時刻-高さ": "Molecular departure time-height",
+    }
+)
+TRANSLATIONS["zh"].update(
+    {
+        "分子離脱解析": "分子脱离分析",
+        "分子種": "分子种类",
+        "クラスタ距離": "团簇截断距离",
+        "確定連続時刻数": "确认连续时刻数",
+        "高さビン数": "高度分箱数",
+        "高さビン方式": "高度分箱方式",
+        "高さ等間隔": "等高度",
+        "球面表面積等分": "拟合球面等面积",
+        "分布表示": "分布指标",
+        "イベント件数": "事件数",
+        "面積時間あたり": "单位面积时间",
+        "分子離脱高さ分布": "分子脱离高度分布",
+        "分子離脱 時刻-高さ": "分子脱离 时间-高度",
+    }
+)
+TRANSLATIONS["es"].update(
+    {
+        "分子離脱解析": "Análisis de salida molecular",
+        "分子種": "Especie molecular",
+        "クラスタ距離": "Corte de clúster",
+        "確定連続時刻数": "Fotogramas de confirmación",
+        "高さビン数": "Intervalos de altura",
+        "高さビン方式": "División de altura",
+        "高さ等間隔": "Altura uniforme",
+        "球面表面積等分": "Área esférica uniforme",
+        "分布表示": "Métrica de distribución",
+        "イベント件数": "Número de eventos",
+        "面積時間あたり": "Por área-tiempo",
+        "分子離脱高さ分布": "Altura de salida molecular",
+        "分子離脱 時刻-高さ": "Salida molecular tiempo-altura",
+    }
+)
+TRANSLATIONS["hi"].update(
+    {
+        "分子離脱解析": "आणविक निर्गमन विश्लेषण",
+        "分子種": "अणु प्रजाति",
+        "クラスタ距離": "क्लस्टर कटऑफ",
+        "確定連続時刻数": "पुष्टि फ्रेम",
+        "高さビン数": "ऊंचाई बिन",
+        "高さビン方式": "ऊंचाई बिन विधि",
+        "高さ等間隔": "समान ऊंचाई",
+        "球面表面積等分": "समान गोलाकार क्षेत्रफल",
+        "分布表示": "वितरण माप",
+        "イベント件数": "घटना संख्या",
+        "面積時間あたり": "क्षेत्रफल-समय प्रति",
+        "分子離脱高さ分布": "आणविक निर्गमन ऊंचाई",
+        "分子離脱 時刻-高さ": "आणविक निर्गमन समय-ऊंचाई",
+    }
+)
+
+TRANSLATIONS["en"].update(
+    {
+        "グラフ内容": "Plot content",
+        "グラフタイトル": "Plot title",
+        "x軸ラベル": "x-axis label",
+        "y軸ラベル": "y-axis label",
+        "目盛文字": "Tick text",
+        "文字サイズ": "Font sizes",
+        "タイトル文字": "Title",
+        "軸ラベル文字": "Axis labels",
+        "凡例文字": "Legend",
+        "凡例": "Legend",
+        "全系列で統一": "Apply to all series",
+        "線と凡例": "Lines and legend",
+        "線幅を統一": "Uniform line width",
+        "線幅": "Line width",
+        "線種": "Line style",
+        "元の線種": "Original styles",
+        "実線": "Solid",
+        "破線": "Dashed",
+        "点線": "Dotted",
+        "一点鎖線": "Dash-dot",
+        "凡例位置": "Legend position",
+        "自動配置": "Best",
+        "右上": "Upper right",
+        "右下": "Lower right",
+        "左上": "Upper left",
+        "左下": "Lower left",
+        "グリッド設定": "Grid settings",
+        "グリッド透明度": "Grid opacity",
+        "グリッド線幅": "Grid line width",
+        "グリッド線種": "Grid line style",
+        "x目盛回転 [deg]": "x tick rotation [deg]",
+    }
+)
+TRANSLATIONS["zh"].update(
+    {
+        "グラフ内容": "图表内容",
+        "グラフタイトル": "图表标题",
+        "x軸ラベル": "x 轴标签",
+        "y軸ラベル": "y 轴标签",
+        "目盛文字": "刻度文字",
+        "文字サイズ": "字体大小",
+        "タイトル文字": "标题",
+        "軸ラベル文字": "轴标签",
+        "凡例文字": "图例",
+        "凡例": "图例",
+        "全系列で統一": "应用于所有系列",
+        "線と凡例": "线条和图例",
+        "線幅を統一": "统一线宽",
+        "線幅": "线宽",
+        "線種": "线型",
+        "元の線種": "原始线型",
+        "実線": "实线",
+        "破線": "虚线",
+        "点線": "点线",
+        "一点鎖線": "点划线",
+        "凡例位置": "图例位置",
+        "自動配置": "自动",
+        "右上": "右上",
+        "右下": "右下",
+        "左上": "左上",
+        "左下": "左下",
+        "グリッド設定": "网格设置",
+        "グリッド透明度": "网格透明度",
+        "グリッド線幅": "网格线宽",
+        "グリッド線種": "网格线型",
+        "x目盛回転 [deg]": "x 刻度旋转 [deg]",
+    }
+)
+TRANSLATIONS["es"].update(
+    {
+        "グラフ内容": "Contenido del gráfico",
+        "グラフタイトル": "Título del gráfico",
+        "x軸ラベル": "Etiqueta del eje x",
+        "y軸ラベル": "Etiqueta del eje y",
+        "目盛文字": "Texto de marcas",
+        "文字サイズ": "Tamaños de fuente",
+        "タイトル文字": "Título",
+        "軸ラベル文字": "Etiquetas de eje",
+        "凡例文字": "Leyenda",
+        "凡例": "Leyenda",
+        "全系列で統一": "Aplicar a todas las series",
+        "線と凡例": "Líneas y leyenda",
+        "線幅を統一": "Ancho de línea uniforme",
+        "線幅": "Ancho de línea",
+        "線種": "Estilo de línea",
+        "元の線種": "Estilos originales",
+        "実線": "Continua",
+        "破線": "Discontinua",
+        "点線": "Punteada",
+        "一点鎖線": "Punto-raya",
+        "凡例位置": "Posición de leyenda",
+        "自動配置": "Óptima",
+        "右上": "Superior derecha",
+        "右下": "Inferior derecha",
+        "左上": "Superior izquierda",
+        "左下": "Inferior izquierda",
+        "グリッド設定": "Ajustes de cuadrícula",
+        "グリッド透明度": "Opacidad de cuadrícula",
+        "グリッド線幅": "Ancho de cuadrícula",
+        "グリッド線種": "Estilo de cuadrícula",
+        "x目盛回転 [deg]": "Rotación de marcas x [deg]",
+    }
+)
+TRANSLATIONS["hi"].update(
+    {
+        "グラフ内容": "ग्राफ़ सामग्री",
+        "グラフタイトル": "ग्राफ़ शीर्षक",
+        "x軸ラベル": "x-अक्ष लेबल",
+        "y軸ラベル": "y-अक्ष लेबल",
+        "目盛文字": "टिक टेक्स्ट",
+        "文字サイズ": "फ़ॉन्ट आकार",
+        "タイトル文字": "शीर्षक",
+        "軸ラベル文字": "अक्ष लेबल",
+        "凡例文字": "लीजेंड",
+        "凡例": "लीजेंड",
+        "全系列で統一": "सभी श्रृंखलाओं पर लागू",
+        "線と凡例": "रेखाएँ और लीजेंड",
+        "線幅を統一": "समान रेखा चौड़ाई",
+        "線幅": "रेखा चौड़ाई",
+        "線種": "रेखा शैली",
+        "元の線種": "मूल शैलियाँ",
+        "実線": "ठोस",
+        "破線": "डैश",
+        "点線": "बिंदु",
+        "一点鎖線": "डैश-बिंदु",
+        "凡例位置": "लीजेंड स्थान",
+        "自動配置": "सर्वोत्तम",
+        "右上": "ऊपरी दायाँ",
+        "右下": "निचला दायाँ",
+        "左上": "ऊपरी बायाँ",
+        "左下": "निचला बायाँ",
+        "グリッド設定": "ग्रिड सेटिंग",
+        "グリッド透明度": "ग्रिड अपारदर्शिता",
+        "グリッド線幅": "ग्रिड रेखा चौड़ाई",
+        "グリッド線種": "ग्रिड रेखा शैली",
+        "x目盛回転 [deg]": "x टिक घुमाव [deg]",
+    }
+)
+
 THREE_D_AUTO_MAX_POINTS = 50_000
 QUALITY_DPI_OPTIONS = {
     "低 150dpi": 150,
@@ -873,10 +1087,21 @@ class GraphSettings:
     point_size: float = 18.0
     point_alpha: float = 0.9
     font_size: int = 10
+    title_font_size: int | None = None
+    axis_label_font_size: int | None = None
+    legend_font_size: int | None = None
+    title_text: str | None = None
+    x_label_text: str | None = None
+    y_label_text: str | None = None
     title_visible: bool = True
     axis_labels_visible: bool = True
     tick_labels_visible: bool = True
+    legend_visible: bool = True
+    legend_location: str = "best"
     grid_visible: bool = True
+    grid_alpha: float | None = None
+    grid_line_width: float = 0.8
+    grid_line_style: str = "-"
     axis_mode: str = "auto_fixed"
     axis_auto: bool = True
     x_min: float = 0.0
@@ -887,6 +1112,10 @@ class GraphSettings:
     x_log: bool = False
     y_log: bool = False
     marker: str = "o"
+    marker_override: str | None = None
+    line_width: float | None = None
+    line_style: str = "source"
+    x_tick_rotation: float | None = None
     image_width: float = 8.0
     image_height: float = 5.0
     dpi: int = 300
@@ -1063,6 +1292,7 @@ class AnalyzerWorker(QObject):
                         profile,
                         remote_case,
                         self.settings.density_field,
+                        include_lagrangian=self.settings.departure_enabled,
                         stop_requested=lambda: self._stop_requested,
                         log=self.log.emit,
                     )
@@ -1130,7 +1360,7 @@ class PlotWidget(QWidget):
             s=self.settings.point_size,
             c=self.settings.point_color,
             alpha=self.settings.point_alpha,
-            marker=self.settings.marker,
+            marker=self.settings.marker_override or self.settings.marker,
         )
         self._apply_common_style(axis, x_label, y_label, title)
         self.canvas.draw_idle()
@@ -1162,8 +1392,16 @@ class PlotWidget(QWidget):
                     item.y,
                     label=item.label,
                     color=self._display_series_color(item.color),
-                    linestyle=item.linestyle,
-                    linewidth=item.linewidth,
+                    linestyle=(
+                        item.linestyle
+                        if self.settings.line_style == "source"
+                        else self.settings.line_style
+                    ),
+                    linewidth=(
+                        self.settings.line_width
+                        if self.settings.line_width is not None
+                        else item.linewidth
+                    ),
                     alpha=self.settings.point_alpha,
                 )
             else:
@@ -1174,10 +1412,13 @@ class PlotWidget(QWidget):
                     s=self.settings.point_size,
                     c=self._display_series_color(item.color) or self.settings.point_color,
                     alpha=self.settings.point_alpha,
-                    marker=item.marker or self.settings.marker,
+                    marker=self.settings.marker_override or item.marker or self.settings.marker,
                 )
-        if any(item.label for item in copied_series):
-            axis.legend(fontsize=max(6, self.settings.font_size - 1))
+        if self.settings.legend_visible and any(item.label for item in copied_series):
+            axis.legend(
+                fontsize=self.settings.legend_font_size or max(6, self.settings.font_size - 1),
+                loc=self.settings.legend_location,
+            )
         self._apply_common_style(axis, x_label, y_label, title)
         self.canvas.draw_idle()
 
@@ -1188,7 +1429,6 @@ class PlotWidget(QWidget):
         axis = self.figure.add_subplot(111)
         axis.bar(labels, values, color=self.settings.point_color, alpha=self.settings.point_alpha)
         self._apply_common_style(axis, "", "蒸発完了時間 [s]", title, is_bar=True)
-        axis.tick_params(axis="x", rotation=45 if self.settings.tick_labels_visible else 0)
         self.figure.tight_layout()
         self.canvas.draw_idle()
 
@@ -1266,6 +1506,11 @@ class PlotWidget(QWidget):
         foreground = "#111111" if self.light_theme else COLORS["muted"]
         spine_color = "#111111" if self.light_theme else COLORS["border"]
         grid_color = "#c8c8c8" if self.light_theme else COLORS["grid"]
+        display_title = settings.title_text if settings.title_text is not None else title
+        display_x_label = settings.x_label_text if settings.x_label_text is not None else x_label
+        display_y_label = settings.y_label_text if settings.y_label_text is not None else y_label
+        title_font_size = settings.title_font_size or settings.font_size + 1
+        axis_label_font_size = settings.axis_label_font_size or settings.font_size
         self.figure.set_facecolor(background)
         axis.set_facecolor(background)
         axis.tick_params(colors=foreground)
@@ -1280,10 +1525,16 @@ class PlotWidget(QWidget):
             legend.get_frame().set_edgecolor(spine_color)
             for text in legend.get_texts():
                 text.set_color("#111111" if self.light_theme else COLORS["text"])
-        if settings.title_visible and title:
-            axis.set_title(title, fontsize=settings.font_size + 1)
-        axis.set_xlabel(x_label if settings.axis_labels_visible else "", fontsize=settings.font_size)
-        axis.set_ylabel(y_label if settings.axis_labels_visible else "", fontsize=settings.font_size)
+        if settings.title_visible and display_title:
+            axis.set_title(display_title, fontsize=title_font_size)
+        axis.set_xlabel(
+            display_x_label if settings.axis_labels_visible else "",
+            fontsize=axis_label_font_size,
+        )
+        axis.set_ylabel(
+            display_y_label if settings.axis_labels_visible else "",
+            fontsize=axis_label_font_size,
+        )
         if not is_bar:
             axis.set_xscale("log" if settings.x_log else "linear")
         axis.set_yscale("log" if settings.y_log else "linear")
@@ -1294,7 +1545,24 @@ class PlotWidget(QWidget):
             labelbottom=settings.tick_labels_visible,
             labelleft=settings.tick_labels_visible,
         )
-        axis.grid(settings.grid_visible, color=grid_color, alpha=0.65 if self.light_theme else 0.45)
+        rotation = settings.x_tick_rotation
+        if rotation is None:
+            rotation = 45.0 if is_bar else 0.0
+        axis.tick_params(
+            axis="x",
+            labelrotation=rotation if settings.tick_labels_visible else 0.0,
+        )
+        axis.grid(
+            settings.grid_visible,
+            color=grid_color,
+            alpha=(
+                settings.grid_alpha
+                if settings.grid_alpha is not None
+                else (0.65 if self.light_theme else 0.45)
+            ),
+            linewidth=settings.grid_line_width,
+            linestyle=settings.grid_line_style,
+        )
         if settings.axis_mode in ("auto_fixed", "manual_fixed") or not settings.axis_auto:
             if not is_bar and settings.x_min < settings.x_max:
                 axis.set_xlim(settings.x_min, settings.x_max)
@@ -1424,7 +1692,13 @@ class GraphPngPreviewDialog(QDialog):
 
         settings_group = QGroupBox(_tr("グラフ表示設定", self.language))
         settings_layout = QVBoxLayout(settings_group)
-        body.addWidget(settings_group, 0)
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QFrame.NoFrame)
+        settings_scroll.setMinimumWidth(390)
+        settings_scroll.setMaximumWidth(470)
+        settings_scroll.setWidget(settings_group)
+        body.addWidget(settings_scroll, 0)
         self.preview_stack = QStackedWidget()
         self.preview_scroll_areas: list[QScrollArea] = []
         for widget in self.preview_widgets:
@@ -1445,6 +1719,19 @@ class GraphPngPreviewDialog(QDialog):
             source_row.addWidget(self.source_combo)
             settings_layout.addLayout(source_row)
 
+        content_group = QGroupBox(_tr("グラフ内容", self.language))
+        content_layout = QFormLayout(content_group)
+        self.title_edit = QLineEdit()
+        self.title_edit.setClearButtonEnabled(True)
+        self.x_label_edit = QLineEdit()
+        self.x_label_edit.setClearButtonEnabled(True)
+        self.y_label_edit = QLineEdit()
+        self.y_label_edit.setClearButtonEnabled(True)
+        content_layout.addRow(_tr("グラフタイトル", self.language), self.title_edit)
+        content_layout.addRow(_tr("x軸ラベル", self.language), self.x_label_edit)
+        content_layout.addRow(_tr("y軸ラベル", self.language), self.y_label_edit)
+        settings_layout.addWidget(content_group)
+
         color_row = QHBoxLayout()
         self.color_button = QPushButton(_tr("色", self.language))
         self.point_size_spin = self._double_spin(1.0, 200.0, 1, self.preview_plot.settings.point_size)
@@ -1461,32 +1748,100 @@ class GraphPngPreviewDialog(QDialog):
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(6, 40)
         self.font_size_spin.setValue(self.preview_plot.settings.font_size)
-        self.font_size_spin.setKeyboardTracking(False)
+        self.font_size_spin.setKeyboardTracking(True)
+        self.title_font_size_spin = QSpinBox()
+        self.title_font_size_spin.setRange(6, 72)
+        self.axis_label_font_size_spin = QSpinBox()
+        self.axis_label_font_size_spin.setRange(6, 72)
+        self.legend_font_size_spin = QSpinBox()
+        self.legend_font_size_spin.setRange(6, 72)
         self.marker_combo = QComboBox()
         self.marker_combo.addItems(["o", "s", "^", "D", "x", "+", "."])
         self.marker_combo.setCurrentText(self.preview_plot.settings.marker)
+        self.marker_override_check = QCheckBox(_tr("全系列で統一", self.language))
         self.aspect_combo = QComboBox()
         _combo_set_items(self.aspect_combo, [("自動", "auto"), ("等倍", "equal")], self.language)
         index = self.aspect_combo.findData(self.preview_plot.settings.aspect)
         self.aspect_combo.setCurrentIndex(index if index >= 0 else 0)
-        style_row.addWidget(QLabel(_tr("文字", self.language)))
+        style_row.addWidget(QLabel(_tr("目盛文字", self.language)))
         style_row.addWidget(self.font_size_spin)
         style_row.addWidget(QLabel(_tr("マーカー", self.language)))
         style_row.addWidget(self.marker_combo)
+        style_row.addWidget(self.marker_override_check)
         style_row.addWidget(QLabel(_tr("縦横", self.language)))
         style_row.addWidget(self.aspect_combo)
         settings_layout.addLayout(style_row)
+
+        font_group = QGroupBox(_tr("文字サイズ", self.language))
+        font_layout = QFormLayout(font_group)
+        font_layout.addRow(_tr("タイトル文字", self.language), self.title_font_size_spin)
+        font_layout.addRow(_tr("軸ラベル文字", self.language), self.axis_label_font_size_spin)
+        font_layout.addRow(_tr("凡例文字", self.language), self.legend_font_size_spin)
+        settings_layout.addWidget(font_group)
 
         visibility_row = QHBoxLayout()
         self.title_check = QCheckBox(_tr("タイトル", self.language))
         self.axis_label_check = QCheckBox(_tr("軸ラベル", self.language))
         self.tick_label_check = QCheckBox(_tr("目盛", self.language))
+        self.legend_check = QCheckBox(_tr("凡例", self.language))
         self.grid_check = QCheckBox(_tr("グリッド", self.language))
         visibility_row.addWidget(self.title_check)
         visibility_row.addWidget(self.axis_label_check)
         visibility_row.addWidget(self.tick_label_check)
+        visibility_row.addWidget(self.legend_check)
         visibility_row.addWidget(self.grid_check)
         settings_layout.addLayout(visibility_row)
+
+        line_group = QGroupBox(_tr("線と凡例", self.language))
+        line_layout = QFormLayout(line_group)
+        self.line_width_override_check = QCheckBox(_tr("線幅を統一", self.language))
+        self.line_width_spin = self._double_spin(0.1, 20.0, 1, 1.5, 0.1)
+        line_width_row = QHBoxLayout()
+        line_width_row.addWidget(self.line_width_override_check)
+        line_width_row.addWidget(self.line_width_spin)
+        self.line_style_combo = QComboBox()
+        _combo_set_items(
+            self.line_style_combo,
+            [
+                ("元の線種", "source"),
+                ("実線", "-"),
+                ("破線", "--"),
+                ("点線", ":"),
+                ("一点鎖線", "-."),
+            ],
+            self.language,
+        )
+        self.legend_location_combo = QComboBox()
+        _combo_set_items(
+            self.legend_location_combo,
+            [
+                ("自動配置", "best"),
+                ("右上", "upper right"),
+                ("右下", "lower right"),
+                ("左上", "upper left"),
+                ("左下", "lower left"),
+            ],
+            self.language,
+        )
+        line_layout.addRow(_tr("線幅", self.language), line_width_row)
+        line_layout.addRow(_tr("線種", self.language), self.line_style_combo)
+        line_layout.addRow(_tr("凡例位置", self.language), self.legend_location_combo)
+        settings_layout.addWidget(line_group)
+
+        grid_group = QGroupBox(_tr("グリッド設定", self.language))
+        grid_layout = QFormLayout(grid_group)
+        self.grid_alpha_spin = self._double_spin(0.0, 1.0, 2, 0.65, 0.05)
+        self.grid_line_width_spin = self._double_spin(0.1, 5.0, 1, 0.8, 0.1)
+        self.grid_line_style_combo = QComboBox()
+        _combo_set_items(
+            self.grid_line_style_combo,
+            [("実線", "-"), ("破線", "--"), ("点線", ":"), ("一点鎖線", "-.")],
+            self.language,
+        )
+        grid_layout.addRow(_tr("グリッド透明度", self.language), self.grid_alpha_spin)
+        grid_layout.addRow(_tr("グリッド線幅", self.language), self.grid_line_width_spin)
+        grid_layout.addRow(_tr("グリッド線種", self.language), self.grid_line_style_combo)
+        settings_layout.addWidget(grid_group)
 
         axis_group = QGroupBox(_tr("軸", self.language))
         axis_layout = QFormLayout(axis_group)
@@ -1497,6 +1852,7 @@ class GraphPngPreviewDialog(QDialog):
         self.y_max_spin = self._signed_spin(self.preview_plot.settings.y_max)
         self.x_log_check = QCheckBox(_tr("x対数", self.language))
         self.y_log_check = QCheckBox(_tr("y対数", self.language))
+        self.x_tick_rotation_spin = self._double_spin(-180.0, 180.0, 0, 0.0, 5.0)
         axis_layout.addRow("", self.axis_auto_check)
         axis_layout.addRow(_tr("x最小", self.language), self.x_min_spin)
         axis_layout.addRow(_tr("x最大", self.language), self.x_max_spin)
@@ -1504,6 +1860,7 @@ class GraphPngPreviewDialog(QDialog):
         axis_layout.addRow(_tr("y最大", self.language), self.y_max_spin)
         axis_layout.addRow("", self.x_log_check)
         axis_layout.addRow("", self.y_log_check)
+        axis_layout.addRow(_tr("x目盛回転 [deg]", self.language), self.x_tick_rotation_spin)
         settings_layout.addWidget(axis_group)
 
         output_group = QGroupBox(_tr("PNG", self.language))
@@ -1547,7 +1904,7 @@ class GraphPngPreviewDialog(QDialog):
         spin.setDecimals(decimals)
         spin.setSingleStep(step)
         spin.setValue(value)
-        spin.setKeyboardTracking(False)
+        spin.setKeyboardTracking(True)
         return spin
 
     def _signed_spin(self, value: float) -> QDoubleSpinBox:
@@ -1555,36 +1912,36 @@ class GraphPngPreviewDialog(QDialog):
         spin.setRange(-1.0e100, 1.0e100)
         spin.setSingleStep(1.0)
         spin.setValue(value)
-        spin.setKeyboardTracking(False)
+        spin.setKeyboardTracking(True)
         return spin
 
     def _load_controls_from_preview(self) -> None:
         settings = self.preview_plot.settings
-        self._set_color_button(settings.point_color)
-        self.title_check.setChecked(settings.title_visible)
-        self.axis_label_check.setChecked(settings.axis_labels_visible)
-        self.tick_label_check.setChecked(settings.tick_labels_visible)
-        self.grid_check.setChecked(settings.grid_visible)
-        self.axis_auto_check.setChecked(settings.axis_auto)
-        self.x_log_check.setChecked(settings.x_log)
-        self.y_log_check.setChecked(settings.y_log)
-        self.transparent_check.setChecked(settings.transparent)
-        self._update_axis_spin_enabled()
-
-    def _connect_controls(self) -> None:
-        if self.source_combo is not None:
-            self.source_combo.currentIndexChanged.connect(self.on_source_changed)
-        self.color_button.clicked.connect(self.choose_color)
-        for widget in (
+        controls = (
+            self.title_edit,
+            self.x_label_edit,
+            self.y_label_edit,
             self.point_size_spin,
             self.alpha_spin,
             self.font_size_spin,
+            self.title_font_size_spin,
+            self.axis_label_font_size_spin,
+            self.legend_font_size_spin,
             self.marker_combo,
+            self.marker_override_check,
             self.aspect_combo,
             self.title_check,
             self.axis_label_check,
             self.tick_label_check,
+            self.legend_check,
             self.grid_check,
+            self.line_width_override_check,
+            self.line_width_spin,
+            self.line_style_combo,
+            self.legend_location_combo,
+            self.grid_alpha_spin,
+            self.grid_line_width_spin,
+            self.grid_line_style_combo,
             self.axis_auto_check,
             self.x_min_spin,
             self.x_max_spin,
@@ -1592,6 +1949,133 @@ class GraphPngPreviewDialog(QDialog):
             self.y_max_spin,
             self.x_log_check,
             self.y_log_check,
+            self.x_tick_rotation_spin,
+            self.width_spin,
+            self.height_spin,
+            self.quality_combo,
+            self.transparent_check,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        original_title, original_x_label, original_y_label = self._original_labels()
+        self.title_edit.setText(
+            settings.title_text if settings.title_text is not None else original_title
+        )
+        self.x_label_edit.setText(
+            settings.x_label_text if settings.x_label_text is not None else original_x_label
+        )
+        self.y_label_edit.setText(
+            settings.y_label_text if settings.y_label_text is not None else original_y_label
+        )
+        self._set_color_button(settings.point_color)
+        self.point_size_spin.setValue(settings.point_size)
+        self.alpha_spin.setValue(settings.point_alpha)
+        self.font_size_spin.setValue(settings.font_size)
+        self.title_font_size_spin.setValue(settings.title_font_size or settings.font_size + 1)
+        self.axis_label_font_size_spin.setValue(settings.axis_label_font_size or settings.font_size)
+        self.legend_font_size_spin.setValue(
+            settings.legend_font_size or max(6, settings.font_size - 1)
+        )
+        self.marker_combo.setCurrentText(settings.marker_override or settings.marker)
+        self.marker_override_check.setChecked(settings.marker_override is not None)
+        aspect_index = self.aspect_combo.findData(settings.aspect)
+        self.aspect_combo.setCurrentIndex(aspect_index if aspect_index >= 0 else 0)
+        self.title_check.setChecked(settings.title_visible)
+        self.axis_label_check.setChecked(settings.axis_labels_visible)
+        self.tick_label_check.setChecked(settings.tick_labels_visible)
+        self.legend_check.setChecked(settings.legend_visible)
+        self.grid_check.setChecked(settings.grid_visible)
+        self.line_width_override_check.setChecked(settings.line_width is not None)
+        self.line_width_spin.setValue(
+            settings.line_width if settings.line_width is not None else 1.5
+        )
+        line_style_index = self.line_style_combo.findData(settings.line_style)
+        self.line_style_combo.setCurrentIndex(line_style_index if line_style_index >= 0 else 0)
+        legend_location_index = self.legend_location_combo.findData(settings.legend_location)
+        self.legend_location_combo.setCurrentIndex(
+            legend_location_index if legend_location_index >= 0 else 0
+        )
+        self.grid_alpha_spin.setValue(
+            settings.grid_alpha if settings.grid_alpha is not None else 0.65
+        )
+        self.grid_line_width_spin.setValue(settings.grid_line_width)
+        grid_style_index = self.grid_line_style_combo.findData(settings.grid_line_style)
+        self.grid_line_style_combo.setCurrentIndex(
+            grid_style_index if grid_style_index >= 0 else 0
+        )
+        self.axis_auto_check.setChecked(settings.axis_auto)
+        self.x_min_spin.setValue(settings.x_min)
+        self.x_max_spin.setValue(settings.x_max)
+        self.y_min_spin.setValue(settings.y_min)
+        self.y_max_spin.setValue(settings.y_max)
+        self.x_log_check.setChecked(settings.x_log)
+        self.y_log_check.setChecked(settings.y_log)
+        self.x_tick_rotation_spin.setValue(
+            settings.x_tick_rotation
+            if settings.x_tick_rotation is not None
+            else (45.0 if self._plot_kind() == "bar" else 0.0)
+        )
+        self.width_spin.setValue(settings.image_width)
+        self.height_spin.setValue(settings.image_height)
+        quality_index = self.quality_combo.findData(settings.dpi)
+        self.quality_combo.setCurrentIndex(quality_index if quality_index >= 0 else 1)
+        self.transparent_check.setChecked(settings.transparent)
+        for control in controls:
+            control.blockSignals(False)
+        self._update_axis_spin_enabled()
+        self._update_line_controls_enabled()
+
+    def _plot_kind(self) -> str:
+        return (
+            self.preview_plot._last_plot[0]
+            if self.preview_plot._last_plot is not None
+            else "xy"
+        )
+
+    def _original_labels(self) -> tuple[str, str, str]:
+        if isinstance(self.preview_plot, CombinedPlotWidget):
+            return "", "", ""
+        if self.preview_plot._last_plot is None:
+            return "", "", ""
+        _kind, title, x_label, y_label, _x, _y = self.preview_plot._last_plot
+        return title, x_label, y_label
+
+    def _connect_controls(self) -> None:
+        if self.source_combo is not None:
+            self.source_combo.currentIndexChanged.connect(self.on_source_changed)
+        self.color_button.clicked.connect(self.choose_color)
+        for widget in (self.title_edit, self.x_label_edit, self.y_label_edit):
+            widget.textChanged.connect(lambda _: self.apply_settings())
+        for widget in (
+            self.point_size_spin,
+            self.alpha_spin,
+            self.font_size_spin,
+            self.title_font_size_spin,
+            self.axis_label_font_size_spin,
+            self.legend_font_size_spin,
+            self.marker_combo,
+            self.marker_override_check,
+            self.aspect_combo,
+            self.title_check,
+            self.axis_label_check,
+            self.tick_label_check,
+            self.legend_check,
+            self.grid_check,
+            self.line_width_override_check,
+            self.line_width_spin,
+            self.line_style_combo,
+            self.legend_location_combo,
+            self.grid_alpha_spin,
+            self.grid_line_width_spin,
+            self.grid_line_style_combo,
+            self.axis_auto_check,
+            self.x_min_spin,
+            self.x_max_spin,
+            self.y_min_spin,
+            self.y_max_spin,
+            self.x_log_check,
+            self.y_log_check,
+            self.x_tick_rotation_spin,
             self.width_spin,
             self.height_spin,
             self.quality_combo,
@@ -1619,11 +2103,9 @@ class GraphPngPreviewDialog(QDialog):
             return
         self.preview_stack.setCurrentIndex(index)
         self.preview_plot = self.preview_widgets[index]
-        if isinstance(self.preview_plot, CombinedPlotWidget):
-            self.height_spin.blockSignals(True)
-            self.height_spin.setValue(self.preview_plot.settings.image_height)
-            self.height_spin.blockSignals(False)
-        self.apply_settings()
+        self._load_controls_from_preview()
+        self._update_preview_canvas_size()
+        self.preview_plot.redraw()
 
     @Slot()
     def apply_settings(self) -> None:
@@ -1631,12 +2113,34 @@ class GraphPngPreviewDialog(QDialog):
         settings.point_size = self.point_size_spin.value()
         settings.point_alpha = self.alpha_spin.value()
         settings.font_size = self.font_size_spin.value()
-        settings.marker = self.marker_combo.currentText()
+        settings.title_font_size = self.title_font_size_spin.value()
+        settings.axis_label_font_size = self.axis_label_font_size_spin.value()
+        settings.legend_font_size = self.legend_font_size_spin.value()
+        original_title, original_x_label, original_y_label = self._original_labels()
+        settings.title_text = self._text_override(self.title_edit.text(), original_title)
+        settings.x_label_text = self._text_override(self.x_label_edit.text(), original_x_label)
+        settings.y_label_text = self._text_override(self.y_label_edit.text(), original_y_label)
+        marker_value = self.marker_combo.currentText()
+        settings.marker = marker_value
+        settings.marker_override = (
+            marker_value if self.marker_override_check.isChecked() else None
+        )
         settings.aspect = _combo_data(self.aspect_combo, "auto")
         settings.title_visible = self.title_check.isChecked()
         settings.axis_labels_visible = self.axis_label_check.isChecked()
         settings.tick_labels_visible = self.tick_label_check.isChecked()
+        settings.legend_visible = self.legend_check.isChecked()
         settings.grid_visible = self.grid_check.isChecked()
+        settings.line_width = (
+            self.line_width_spin.value()
+            if self.line_width_override_check.isChecked()
+            else None
+        )
+        settings.line_style = _combo_data(self.line_style_combo, "source")
+        settings.legend_location = _combo_data(self.legend_location_combo, "best")
+        settings.grid_alpha = self.grid_alpha_spin.value()
+        settings.grid_line_width = self.grid_line_width_spin.value()
+        settings.grid_line_style = _combo_data(self.grid_line_style_combo, "-")
         settings.axis_auto = self.axis_auto_check.isChecked()
         settings.x_min = self.x_min_spin.value()
         settings.x_max = self.x_max_spin.value()
@@ -1644,14 +2148,21 @@ class GraphPngPreviewDialog(QDialog):
         settings.y_max = self.y_max_spin.value()
         settings.x_log = self.x_log_check.isChecked()
         settings.y_log = self.y_log_check.isChecked()
+        settings.x_tick_rotation = self.x_tick_rotation_spin.value()
         settings.image_width = self.width_spin.value()
         settings.image_height = self.height_spin.value()
         settings.dpi = int(self.quality_combo.currentData() or QUALITY_DPI_OPTIONS[DEFAULT_QUALITY_LABEL])
         settings.transparent = self.transparent_check.isChecked()
         self._update_axis_spin_enabled()
+        self._update_line_controls_enabled()
         self.preview_plot.figure.set_size_inches(settings.image_width, settings.image_height, forward=False)
         self._update_preview_canvas_size()
         self.preview_plot.redraw()
+
+    @staticmethod
+    def _text_override(value: str, original: str) -> str | None:
+        text = value.strip()
+        return None if text == original else text
 
     def _update_preview_canvas_size(self) -> None:
         settings = self.preview_plot.settings
@@ -1663,7 +2174,7 @@ class GraphPngPreviewDialog(QDialog):
         self.preview_plot.setFixedSize(width, height)
 
     def _update_axis_spin_enabled(self) -> None:
-        plot_kind = self.preview_plot._last_plot[0] if self.preview_plot._last_plot is not None else "xy"
+        plot_kind = self._plot_kind()
         x_axis_available = plot_kind in ("xy", "series")
         manual_axis = not self.axis_auto_check.isChecked()
         self.x_min_spin.setEnabled(manual_axis and x_axis_available)
@@ -1671,6 +2182,15 @@ class GraphPngPreviewDialog(QDialog):
         self.y_min_spin.setEnabled(manual_axis)
         self.y_max_spin.setEnabled(manual_axis)
         self.x_log_check.setEnabled(x_axis_available)
+
+    def _update_line_controls_enabled(self) -> None:
+        self.line_width_spin.setEnabled(self.line_width_override_check.isChecked())
+        self.legend_location_combo.setEnabled(self.legend_check.isChecked())
+        self.legend_font_size_spin.setEnabled(self.legend_check.isChecked())
+        grid_enabled = self.grid_check.isChecked()
+        self.grid_alpha_spin.setEnabled(grid_enabled)
+        self.grid_line_width_spin.setEnabled(grid_enabled)
+        self.grid_line_style_combo.setEnabled(grid_enabled)
 
     def _set_color_button(self, color: str) -> None:
         self.color_button.setStyleSheet(f"background-color: {color};")
@@ -2475,6 +2995,51 @@ class MainWindow(QMainWindow):
         advanced_layout.addRow("xy周期補正", self.contact_unwrap_check)
         self.settings_grid.addWidget(self.advanced_group, 0, 1)
 
+        self.departure_group = QGroupBox("分子離脱解析")
+        departure_layout = QFormLayout(self.departure_group)
+        departure_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.departure_enabled_check = QCheckBox("有効")
+        self.departure_species_edit = QLineEdit("water")
+        self.departure_cutoff_nm_spin = QDoubleSpinBox()
+        self.departure_cutoff_nm_spin.setDecimals(3)
+        self.departure_cutoff_nm_spin.setRange(0.01, 10.0)
+        self.departure_cutoff_nm_spin.setSingleStep(0.05)
+        self.departure_cutoff_nm_spin.setSuffix(" nm")
+        self.departure_cutoff_nm_spin.setValue(0.40)
+        self.departure_confirmation_spin = QSpinBox()
+        self.departure_confirmation_spin.setRange(1, 100)
+        self.departure_confirmation_spin.setValue(3)
+        self.departure_height_bins_spin = QSpinBox()
+        self.departure_height_bins_spin.setRange(1, 100)
+        self.departure_height_bins_spin.setValue(10)
+        self.departure_bin_mode_combo = QComboBox()
+        _combo_set_items(
+            self.departure_bin_mode_combo,
+            [
+                ("高さ等間隔", "equal_height"),
+                ("球面表面積等分", "equal_surface_area"),
+            ],
+            self.language,
+        )
+        self.departure_bin_mode_combo.setToolTip(
+            "球フィットでは球面帯面積 dA=2πRdz のため、"
+            "表面積等分の境界は高さ等間隔と一致します。"
+        )
+        self.departure_intensity_combo = QComboBox()
+        _combo_set_items(
+            self.departure_intensity_combo,
+            [("イベント件数", "count"), ("面積時間あたり", "rate")],
+            self.language,
+        )
+        departure_layout.addRow("分子離脱解析", self.departure_enabled_check)
+        departure_layout.addRow("分子種", self.departure_species_edit)
+        departure_layout.addRow("クラスタ距離", self.departure_cutoff_nm_spin)
+        departure_layout.addRow("確定連続時刻数", self.departure_confirmation_spin)
+        departure_layout.addRow("高さビン数", self.departure_height_bins_spin)
+        departure_layout.addRow("高さビン方式", self.departure_bin_mode_combo)
+        departure_layout.addRow("分布表示", self.departure_intensity_combo)
+        self.settings_grid.addWidget(self.departure_group, 1, 1)
+
         self.theory_group = QGroupBox("蒸発係数 / 理論比較")
         theory_layout = QFormLayout(self.theory_group)
         theory_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
@@ -2528,7 +3093,7 @@ class MainWindow(QMainWindow):
         theory_layout.addRow("fit alpha_e 下限", self.theory_fit_alpha_min_spin)
         theory_layout.addRow("fit alpha_e 上限", self.theory_fit_alpha_max_spin)
         theory_layout.addRow("計算確認", self.theory_diagnostics_label)
-        self.settings_grid.addWidget(self.theory_group, 1, 1)
+        self.settings_grid.addWidget(self.theory_group, 2, 0, 1, 2)
         self.settings_grid.setColumnStretch(0, 1)
         self.settings_grid.setColumnStretch(1, 1)
         self.settings_grid.setRowStretch(2, 1)
@@ -2545,6 +3110,12 @@ class MainWindow(QMainWindow):
             self.contact_fit_lower_spin,
             self.contact_fit_upper_spin,
             self.contact_average_percent_spin,
+            self.departure_species_edit,
+            self.departure_cutoff_nm_spin,
+            self.departure_confirmation_spin,
+            self.departure_height_bins_spin,
+            self.departure_bin_mode_combo,
+            self.departure_intensity_combo,
             self.theory_preset_combo,
             self.theory_rho_v_spin,
             self.theory_rho_l_spin,
@@ -2742,12 +3313,16 @@ class MainWindow(QMainWindow):
         self.contact_angle_plot = PlotWidget()
         self.contact_radius_plot = PlotWidget()
         self.evap_plot = PlotWidget()
+        self.departure_distribution_plot = PlotWidget()
+        self.departure_time_height_plot = PlotWidget()
         self.visual_plot = VisualizationPlotWidget()
         self.tabs.addTab(self.volume_plot, "体積-時間")
         self.tabs.addTab(self.radius_plot, "等価半径-時間")
         self.tabs.addTab(self.contact_angle_plot, "接触角-時間")
         self.tabs.addTab(self.contact_radius_plot, "接触半径-時間")
         self.tabs.addTab(self.evap_plot, "蒸発完了時刻")
+        self.tabs.addTab(self.departure_distribution_plot, "分子離脱高さ分布")
+        self.tabs.addTab(self.departure_time_height_plot, "分子離脱 時刻-高さ")
 
         self.theory_tab = QWidget()
         theory_tab_layout = QVBoxLayout(self.theory_tab)
@@ -2888,6 +3463,8 @@ class MainWindow(QMainWindow):
         self.contact_angle_plot.clear("接触角-時間")
         self.contact_radius_plot.clear("接触半径-時間")
         self.evap_plot.clear("蒸発完了時刻")
+        self.departure_distribution_plot.clear("分子離脱高さ分布")
+        self.departure_time_height_plot.clear("分子離脱 時刻-高さ")
         self.theory_em_plot.clear("蒸発量 EM-時間")
         self.theory_radius_plot.clear("理論/MD 等価半径-時間")
 
@@ -2950,6 +3527,12 @@ class MainWindow(QMainWindow):
         self.export_all_png_button.clicked.connect(self.export_all_png)
         self.table.itemSelectionChanged.connect(self.update_selected_case_plots)
         self.tabs.currentChanged.connect(self.on_result_tab_changed)
+        self.departure_intensity_combo.currentIndexChanged.connect(
+            lambda _: (
+                self.update_common_axis_ranges(),
+                self.refresh_current_result_tab(),
+            )
+        )
         self.theory_preset_combo.currentTextChanged.connect(self.apply_theory_preset)
         for widget in (
             self.theory_show_md_check,
@@ -3063,6 +3646,19 @@ class MainWindow(QMainWindow):
         _combo_set_items(self.theory_theta_source_combo, [("平均接触角", "average"), ("固定theta", "fixed")], self.language)
         _combo_set_items(self.graph_aspect_combo, [("自動", "auto"), ("等倍", "equal")], self.language)
         _combo_set_items(self.graph_axis_mode_combo, [("自動固定", "auto_fixed"), ("手動固定", "manual_fixed")], self.language)
+        _combo_set_items(
+            self.departure_bin_mode_combo,
+            [
+                ("高さ等間隔", "equal_height"),
+                ("球面表面積等分", "equal_surface_area"),
+            ],
+            self.language,
+        )
+        _combo_set_items(
+            self.departure_intensity_combo,
+            [("イベント件数", "count"), ("面積時間あたり", "rate")],
+            self.language,
+        )
         _combo_set_items(self.visual_mode_combo, [("2D診断", "2d"), ("3D概観", "3d")], self.language)
         self._set_quality_combo_items(self.graph_quality_combo)
         self.table.setHorizontalHeaderLabels([self.t(header) for header in self.table_header_sources])
@@ -3439,6 +4035,17 @@ class MainWindow(QMainWindow):
             contact_fit_upper=self.contact_fit_upper_spin.value(),
             contact_unwrap_xy=self.contact_unwrap_check.isChecked(),
             contact_average_percent=self.contact_average_percent_spin.value(),
+            departure_enabled=self.departure_enabled_check.isChecked(),
+            departure_species=(
+                self.departure_species_edit.text().strip() or "water"
+            ),
+            departure_cutoff=self.departure_cutoff_nm_spin.value() / 1.0e9,
+            departure_confirmation_frames=self.departure_confirmation_spin.value(),
+            departure_height_bins=self.departure_height_bins_spin.value(),
+            departure_bin_mode=_combo_data(
+                self.departure_bin_mode_combo,
+                "equal_height",
+            ),
         )
 
     def apply_analysis_settings(self, settings: AnalysisSettings) -> None:
@@ -3459,6 +4066,23 @@ class MainWindow(QMainWindow):
         self.contact_unwrap_check.setChecked(settings.contact_unwrap_xy)
         self.contact_average_percent_spin.setValue(
             settings.contact_average_percent
+        )
+        self.departure_enabled_check.setChecked(settings.departure_enabled)
+        self.departure_species_edit.setText(settings.departure_species)
+        self.departure_cutoff_nm_spin.setValue(
+            settings.departure_cutoff / 1.0e-9
+        )
+        self.departure_confirmation_spin.setValue(
+            settings.departure_confirmation_frames
+        )
+        self.departure_height_bins_spin.setValue(
+            settings.departure_height_bins
+        )
+        bin_mode_index = self.departure_bin_mode_combo.findData(
+            settings.departure_bin_mode
+        )
+        self.departure_bin_mode_combo.setCurrentIndex(
+            bin_mode_index if bin_mode_index >= 0 else 0
         )
 
     @Slot()
@@ -3904,6 +4528,24 @@ class MainWindow(QMainWindow):
                 self._plot_standard_result_for_export(self.contact_radius_plot, result, "contact_radius_time")
         elif tab is self.evap_plot:
             self.update_evap_plot()
+        elif tab is self.departure_distribution_plot:
+            if result is None:
+                self.departure_distribution_plot.clear("分子離脱高さ分布")
+            else:
+                self._plot_departure_result(
+                    self.departure_distribution_plot,
+                    result,
+                    "departure_height_distribution",
+                )
+        elif tab is self.departure_time_height_plot:
+            if result is None:
+                self.departure_time_height_plot.clear("分子離脱 時刻-高さ")
+            else:
+                self._plot_departure_result(
+                    self.departure_time_height_plot,
+                    result,
+                    "departure_time_height",
+                )
         elif tab is self.theory_tab:
             self.update_theory_plots(result)
         elif tab is self.visual_tab:
@@ -4294,6 +4936,10 @@ class MainWindow(QMainWindow):
             return "contact_radius_time"
         if tab is self.evap_plot:
             return "evaporation_time_all_cases"
+        if tab is self.departure_distribution_plot:
+            return "departure_height_distribution"
+        if tab is self.departure_time_height_plot:
+            return "departure_time_height"
         if tab is self.theory_tab:
             target = self.graph_axis_target_combo.currentData() if hasattr(self, "graph_axis_target_combo") else ""
             return "theory_equivalent_radius" if target == "theory_equivalent_radius" else "theory_evaporated_mass"
@@ -4307,6 +4953,8 @@ class MainWindow(QMainWindow):
             "contact_angle_time",
             "contact_radius_time",
             "evaporation_time_all_cases",
+            "departure_height_distribution",
+            "departure_time_height",
             "theory_evaporated_mass",
             "theory_equivalent_radius",
         ):
@@ -4337,6 +4985,36 @@ class MainWindow(QMainWindow):
         elif kind == "evaporation_time_all_cases":
             y_values = [result.evaporation_time for result in self.results if result.evaporation_time is not None]
             x_values = list(range(len(y_values)))
+        elif kind in ("departure_height_distribution", "departure_time_height"):
+            for result in self.results:
+                departure = result.departure_result
+                if departure is None or departure.status != "ok":
+                    continue
+                if kind == "departure_height_distribution":
+                    rate_mode = (
+                        _combo_data(self.departure_intensity_combo, "count")
+                        == "rate"
+                    )
+                    for item in departure.height_bins:
+                        center = (item.eta_lower + item.eta_upper) / 2.0
+                        values = (
+                            (item.raw_rate, item.confirmed_rate)
+                            if rate_mode
+                            else (
+                                float(item.raw_count),
+                                float(item.confirmed_count),
+                            )
+                        )
+                        for value in values:
+                            if value is not None:
+                                x_values.append(center)
+                                y_values.append(value)
+                else:
+                    for event in departure.events:
+                        eta = event.normalized_height
+                        if eta is not None and 0.0 <= eta <= 1.0:
+                            x_values.append(event.event_time)
+                            y_values.append(eta)
         elif kind in ("theory_evaporated_mass", "theory_equivalent_radius"):
             value_kind = "em" if kind == "theory_evaporated_mass" else "radius"
             for result in self.results:
@@ -4369,6 +5047,10 @@ class MainWindow(QMainWindow):
             return "contact_radius_time", self.contact_radius_plot
         if tab is self.evap_plot:
             return "evaporation_time_all_cases", self.evap_plot
+        if tab is self.departure_distribution_plot:
+            return "departure_height_distribution", self.departure_distribution_plot
+        if tab is self.departure_time_height_plot:
+            return "departure_time_height", self.departure_time_height_plot
         return None
 
     def _theory_png_options(self, result: CaseResult | None = None) -> list[tuple[str, PlotWidget | list[PlotWidget], str]]:
@@ -4387,6 +5069,8 @@ class MainWindow(QMainWindow):
             "equivalent_radius_time": "equivalent_radius_time",
             "contact_angle_time": "contact_angle_time",
             "contact_radius_time": "contact_radius_time",
+            "departure_height_distribution": "departure_height_distribution",
+            "departure_time_height": "departure_time_height",
             "theory": "theory",
             "theory_evaporated_mass": "theory_evaporated_mass",
             "theory_equivalent_radius": "theory_equivalent_radius",
@@ -4462,6 +5146,8 @@ class MainWindow(QMainWindow):
             return plot
         if kind in ("volume_time", "equivalent_radius_time", "contact_angle_time", "contact_radius_time"):
             self._plot_standard_result_for_export(plot, result, kind)
+        elif kind in ("departure_height_distribution", "departure_time_height"):
+            self._plot_departure_result(plot, result, kind)
         elif kind == "theory_combined":
             return self._plot_combined_theory_result_for_export(result, base_plot)
         elif kind in ("theory_evaporated_mass", "theory_equivalent_radius"):
@@ -4506,8 +5192,13 @@ class MainWindow(QMainWindow):
                 [point[0] for point in points],
                 [point[1] for point in points],
             )
+
         elif kind == "contact_radius_time":
-            points = [(row.time, row.contact_radius) for row in rows if row.contact_radius is not None]
+            points = [
+                (row.time, row.contact_radius)
+                for row in rows
+                if row.contact_radius is not None
+            ]
             plot.plot_xy(
                 f"{result.case_name}: 接触半径-時間",
                 "時間 [s]",
@@ -4516,6 +5207,127 @@ class MainWindow(QMainWindow):
                 [point[1] for point in points],
             )
 
+    def _plot_departure_result(
+        self,
+        plot: PlotWidget,
+        result: CaseResult,
+        kind: str,
+    ) -> None:
+        departure = result.departure_result
+        self._apply_axis_settings_for_kind(plot, kind)
+        if departure is None:
+            plot.clear(f"{result.case_name}: 分子離脱解析は無効です")
+            return
+        if departure.status != "ok":
+            message = departure.error or departure.status
+            plot.clear(f"{result.case_name}: {message}")
+            return
+
+        excluded = departure.excluded_normalized_height_count
+        if kind == "departure_height_distribution":
+            bin_mode_label = (
+                "球面表面積等分"
+                if departure.bin_mode == "equal_surface_area"
+                else "高さ等間隔"
+            )
+            rate_mode = (
+                _combo_data(self.departure_intensity_combo, "count") == "rate"
+            )
+            centers = [
+                (item.eta_lower + item.eta_upper) / 2.0
+                for item in departure.height_bins
+            ]
+            raw_values = [
+                (
+                    float("nan")
+                    if item.raw_rate is None
+                    else item.raw_rate
+                )
+                if rate_mode
+                else float(item.raw_count)
+                for item in departure.height_bins
+            ]
+            confirmed_values = [
+                (
+                    float("nan")
+                    if item.confirmed_rate is None
+                    else item.confirmed_rate
+                )
+                if rate_mode
+                else float(item.confirmed_count)
+                for item in departure.height_bins
+            ]
+            y_label = (
+                "イベント率 [1/(m^2 s)]"
+                if rate_mode
+                else "イベント件数"
+            )
+            plot.plot_series(
+                f"{result.case_name}: 分子離脱高さ分布 "
+                f"({bin_mode_label}, 範囲外 {excluded})",
+                "正規化高さ eta",
+                y_label,
+                [
+                    PlotSeries(
+                        "全離脱",
+                        centers,
+                        raw_values,
+                        style="scatter",
+                        color="#7f8c8d",
+                        marker="o",
+                    ),
+                    PlotSeries(
+                        "確定離脱",
+                        centers,
+                        confirmed_values,
+                        style="scatter",
+                        color="#d62728",
+                        marker="s",
+                    ),
+                ],
+            )
+            return
+
+        raw_events = [
+            event
+            for event in departure.events
+            if not event.confirmed
+            and event.normalized_height is not None
+            and 0.0 <= event.normalized_height <= 1.0
+        ]
+        confirmed_events = [
+            event
+            for event in departure.events
+            if event.confirmed
+            and event.normalized_height is not None
+            and 0.0 <= event.normalized_height <= 1.0
+        ]
+        plot.plot_series(
+            f"{result.case_name}: 分子離脱 時刻-高さ (範囲外 {excluded})",
+            "時刻 [s]",
+            "正規化高さ eta",
+            [
+                PlotSeries(
+                    "未確定離脱",
+                    [event.event_time for event in raw_events],
+                    [float(event.normalized_height) for event in raw_events],
+                    style="scatter",
+                    color="#7f8c8d",
+                    marker="o",
+                ),
+                PlotSeries(
+                    "確定離脱",
+                    [event.event_time for event in confirmed_events],
+                    [
+                        float(event.normalized_height)
+                        for event in confirmed_events
+                    ],
+                    style="scatter",
+                    color="#d62728",
+                    marker="s",
+                ),
+            ],
+        )
     def _plot_theory_result_for_export(self, plot: PlotWidget, result: CaseResult, kind: str) -> None:
         comparison = self._theory_comparison(result)
         self._apply_axis_settings_for_kind(plot, kind)
@@ -4662,6 +5474,14 @@ class MainWindow(QMainWindow):
         out_dir.mkdir(parents=True, exist_ok=True)
         write_summary_csv(out_dir / "mdfoam_summary.csv", self.results)
         write_timeseries_csv(out_dir / "mdfoam_timeseries.csv", self.results)
+        write_departure_events_csv(
+            out_dir / "mdfoam_departure_events.csv",
+            self.results,
+        )
+        write_departure_height_bins_csv(
+            out_dir / "mdfoam_departure_height_bins.csv",
+            self.results,
+        )
         theory_settings = self.theory_settings()
         write_theory_summary_csv(out_dir / "mdfoam_theory_summary.csv", self.results, theory_settings, DEFAULT_ALPHA_VALUES)
         write_theory_timeseries_csv(out_dir / "mdfoam_theory_timeseries.csv", self.results, theory_settings, DEFAULT_ALPHA_VALUES)
@@ -4748,13 +5568,15 @@ class MainWindow(QMainWindow):
                 (self.advanced_group, 1, 0),
                 (self.fallback_group, 2, 0),
                 (self.theory_group, 3, 0),
+                (self.departure_group, 4, 0),
             )
             if compact
             else (
                 (self.basic_group, 0, 0),
                 (self.advanced_group, 0, 1),
                 (self.fallback_group, 1, 0),
-                (self.theory_group, 1, 1),
+                (self.departure_group, 1, 1),
+                (self.theory_group, 2, 0),
             )
         )
         for widget, row, column in positions:
@@ -4824,13 +5646,12 @@ def _draw_plot_on_axis(
                 s=settings.point_size,
                 c=settings.point_color,
                 alpha=settings.point_alpha,
-                marker=settings.marker,
+                marker=settings.marker_override or settings.marker,
             )
             plot._apply_common_style(axis, x_label, y_label, title)
         elif kind == "bar":
             axis.bar(x, y, color=settings.point_color, alpha=settings.point_alpha)
             plot._apply_common_style(axis, "", y_label, title, is_bar=True)
-            axis.tick_params(axis="x", rotation=45 if settings.tick_labels_visible else 0)
         elif kind == "series" and plot._last_series is not None:
             title, x_label, y_label, series_list = plot._last_series
             for item in series_list:
@@ -4842,8 +5663,16 @@ def _draw_plot_on_axis(
                         item.y,
                         label=item.label,
                         color=plot._display_series_color(item.color),
-                        linestyle=item.linestyle,
-                        linewidth=item.linewidth,
+                        linestyle=(
+                            item.linestyle
+                            if settings.line_style == "source"
+                            else settings.line_style
+                        ),
+                        linewidth=(
+                            settings.line_width
+                            if settings.line_width is not None
+                            else item.linewidth
+                        ),
                         alpha=settings.point_alpha,
                     )
                 else:
@@ -4854,10 +5683,13 @@ def _draw_plot_on_axis(
                         s=settings.point_size,
                         c=plot._display_series_color(item.color) or settings.point_color,
                         alpha=settings.point_alpha,
-                        marker=item.marker or settings.marker,
+                        marker=settings.marker_override or item.marker or settings.marker,
                     )
-            if any(item.label for item in series_list):
-                axis.legend(fontsize=max(6, settings.font_size - 1))
+            if settings.legend_visible and any(item.label for item in series_list):
+                axis.legend(
+                    fontsize=settings.legend_font_size or max(6, settings.font_size - 1),
+                    loc=settings.legend_location,
+                )
             plot._apply_common_style(axis, x_label, y_label, title)
         elif kind == "clear":
             plot._apply_common_style(axis, "", "", title)

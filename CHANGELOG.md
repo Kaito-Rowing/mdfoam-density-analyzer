@@ -6,6 +6,18 @@ This project follows a lightweight changelog format. Version numbers are intende
 
 ## [Unreleased]
 
+### Added
+
+- Optional molecular departure tracking by `(origProcId, origId)` using
+  density-seeded periodic water clusters.
+- Raw and confirmed departure events, normalized height/radius metrics,
+  area-time-normalized height distributions, and time-height plots.
+- Molecular departure CSV exports and manifest summaries.
+- Selectable equal-height and equal-fitted-surface-area departure bins, with
+  the selected mode recorded in CSV and manifest outputs.
+- SSH synchronization for `positions`, `id`, `origId`, `origProcId`, and
+  `constant/idList` when molecular analysis is enabled.
+
 ## [0.2.1] - 2026-06-06
 
 ### Added

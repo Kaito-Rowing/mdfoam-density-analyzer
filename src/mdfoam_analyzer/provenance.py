@@ -131,6 +131,7 @@ def _run_context_payload(context: RunContext) -> dict[str, Any]:
 
 def _case_payload(result: CaseResult) -> dict[str, Any]:
     mesh = asdict(result.mesh_statistics) if result.mesh_statistics is not None else None
+    departure = result.departure_result
     return {
         "case_name": result.case_name,
         "source_case_path": result.source_case_path,
@@ -141,6 +142,30 @@ def _case_payload(result: CaseResult) -> dict[str, Any]:
         "volume_mode": result.volume_mode,
         "input_files": [asdict(item) for item in result.input_files],
         "mesh_statistics": mesh,
+        "molecular_departure": (
+            None
+            if departure is None
+            else {
+                "status": departure.status,
+                "species_name": departure.species_name,
+                "bin_mode": departure.bin_mode,
+                "species_id": departure.species_id,
+                "frame_count": departure.frame_count,
+                "raw_event_count": departure.raw_event_count,
+                "confirmed_event_count": departure.confirmed_event_count,
+                "excluded_normalized_height_count": (
+                    departure.excluded_normalized_height_count
+                ),
+                "fallback_cluster_frame_count": (
+                    departure.fallback_cluster_frame_count
+                ),
+                "warning": departure.warning,
+                "error": departure.error,
+                "height_bins": [
+                    asdict(item) for item in departure.height_bins
+                ],
+            }
+        ),
         "result_summary": {
             "time_count": result.time_count,
             "max_volume": result.max_volume,
@@ -165,17 +190,27 @@ def _validate_document(payload: dict[str, Any], expected_format: str) -> None:
 
 
 def _validate_setting(name: str, value: Any) -> Any:
-    if name == "density_field":
+    if name in {"density_field", "departure_species"}:
         if not isinstance(value, str) or not value:
-            raise ProvenanceError("density_field must be a non-empty string")
+            raise ProvenanceError(f"{name} must be a non-empty string")
         return value
-    if name == "contact_unwrap_xy":
+    if name == "departure_bin_mode":
+        if value not in {"equal_height", "equal_surface_area"}:
+            raise ProvenanceError(
+                "departure_bin_mode must be equal_height or equal_surface_area"
+            )
+        return value
+    if name in {"contact_unwrap_xy", "departure_enabled"}:
         if not isinstance(value, bool):
-            raise ProvenanceError("contact_unwrap_xy must be boolean")
+            raise ProvenanceError(f"{name} must be boolean")
         return value
-    if name == "consecutive_zero_count":
+    if name in {
+        "consecutive_zero_count",
+        "departure_confirmation_frames",
+        "departure_height_bins",
+    }:
         if not isinstance(value, int) or isinstance(value, bool):
-            raise ProvenanceError("consecutive_zero_count must be an integer")
+            raise ProvenanceError(f"{name} must be an integer")
         return value
     if name in {"manual_cell_volume", "dx", "dy", "dz"} and value is None:
         return None

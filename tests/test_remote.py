@@ -84,10 +84,13 @@ def sample_tree() -> dict[str, bytes | None]:
         "/parent/case001/main/constant/polyMesh/faces": b"faces",
         "/parent/case001/main/constant/polyMesh/owner": b"owner",
         "/parent/case001/main/constant/polyMesh/neighbour": b"neighbour",
+        "/parent/case001/main/constant/idList": b"idList",
         "/parent/case001/main/0/rhoM_water": b"rho0",
         "/parent/case001/main/1e-10/rhoM_water": b"rho1",
         "/parent/case001/main/1e-10/lagrangian/moleculeCloud/positions": b"positions",
         "/parent/case001/main/1e-10/lagrangian/moleculeCloud/id": b"id",
+        "/parent/case001/main/1e-10/lagrangian/moleculeCloud/origId": b"origId",
+        "/parent/case001/main/1e-10/lagrangian/moleculeCloud/origProcId": b"origProcId",
         "/parent/case001/main/notes/readme.txt": b"ignore",
         "/parent/case002/main/processor0/constant/polyMesh/points": b"p",
         "/parent/case002/main/processor0/constant/polyMesh/faces": b"f",
@@ -161,6 +164,47 @@ class RemoteSyncTests(unittest.TestCase):
                 (local_case / "main" / "1e-10" / "lagrangian" / "moleculeCloud" / "id").read_bytes(),
                 b"id",
             )
+            self.assertEqual(
+                (local_case / "main" / "1e-10" / "lagrangian" / "moleculeCloud" / "origId").read_bytes(),
+                b"origId",
+            )
+            self.assertEqual(
+                (local_case / "main" / "constant" / "idList").read_bytes(),
+                b"idList",
+            )
+
+    def test_sync_case_can_include_all_departure_inputs(self) -> None:
+        sftp = FakeSftp(sample_tree())
+        profile = RemoteProfile("test", "host", 22, "user", "", "", "/parent")
+        old_local_appdata = os.environ.get("LOCALAPPDATA")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["LOCALAPPDATA"] = temp_dir
+            try:
+                local_case = sync_remote_case(
+                    sftp,
+                    profile,
+                    "/parent/case001",
+                    "rhoM_water",
+                    include_lagrangian=True,
+                )
+                cloud = (
+                    local_case
+                    / "main"
+                    / "1e-10"
+                    / "lagrangian"
+                    / "moleculeCloud"
+                )
+                for name in ("positions", "id", "origId", "origProcId"):
+                    self.assertTrue((cloud / name).is_file())
+                self.assertTrue(
+                    (local_case / "main" / "constant" / "idList").is_file()
+                )
+            finally:
+                if old_local_appdata is None:
+                    os.environ.pop("LOCALAPPDATA", None)
+                else:
+                    os.environ["LOCALAPPDATA"] = old_local_appdata
+                shutil.rmtree(Path(temp_dir), ignore_errors=True)
 
 
 if __name__ == "__main__":

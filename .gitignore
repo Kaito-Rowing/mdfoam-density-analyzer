@@ -27,6 +27,7 @@ mdfoam_summary.csv
 mdfoam_timeseries.csv
 mdfoam_project.json
 analysis_manifest.json
+docs/images/molecular_departure/
 *.png
 !docs/screenshots/*.png
 Sesshoku6.py

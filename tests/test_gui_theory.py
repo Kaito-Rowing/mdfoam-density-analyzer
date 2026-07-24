@@ -29,7 +29,12 @@ from mdfoam_analyzer.gui import (
     CombinedPlotWidget,
     GraphPngPreviewDialog,
     MainWindow,
+    PlotSeries,
     PlotWidget,
+)
+from mdfoam_analyzer.molecular_departure import (
+    DepartureHeightBin,
+    MolecularDepartureResult,
 )
 from mdfoam_analyzer.provenance import RunContext
 from mdfoam_analyzer.theory import evaporation_flux
@@ -82,6 +87,12 @@ class GuiTheorySettingsTests(unittest.TestCase):
                 contact_fit_upper=0.8,
                 contact_unwrap_xy=False,
                 contact_average_percent=55.0,
+                departure_enabled=True,
+                departure_species="water",
+                departure_cutoff=5.0e-10,
+                departure_confirmation_frames=4,
+                departure_height_bins=12,
+                departure_bin_mode="equal_surface_area",
             )
 
             window.apply_analysis_settings(settings)
@@ -128,6 +139,61 @@ class GuiTheorySettingsTests(unittest.TestCase):
                     manifest["cases"][0]["result_summary"]["time_count"],
                     1,
                 )
+                self.assertTrue(
+                    (output / "mdfoam_departure_events.csv").is_file()
+                )
+                self.assertTrue(
+                    (output / "mdfoam_departure_height_bins.csv").is_file()
+                )
+        finally:
+            window.close()
+
+    def test_departure_distribution_plot_switches_between_count_and_rate(self) -> None:
+        window = MainWindow()
+        try:
+            result = CaseResult(
+                case_name="case001",
+                case_dir=Path(),
+                status="ok",
+                rows=[TimeResult(0.0, 1.0, 1.0, 1, 1)],
+                departure_result=MolecularDepartureResult(
+                    status="ok",
+                    species_name="water",
+                    height_bins=[
+                        DepartureHeightBin(
+                            0,
+                            0.0,
+                            0.5,
+                            4,
+                            3,
+                            2.0,
+                            2.0,
+                            1.5,
+                        )
+                    ],
+                ),
+            )
+
+            window._plot_departure_result(
+                window.departure_distribution_plot,
+                result,
+                "departure_height_distribution",
+            )
+            count_series = window.departure_distribution_plot._last_series
+            self.assertIsNotNone(count_series)
+            self.assertEqual(count_series[3][0].y, [4.0])
+
+            window.departure_intensity_combo.setCurrentIndex(
+                window.departure_intensity_combo.findData("rate")
+            )
+            window._plot_departure_result(
+                window.departure_distribution_plot,
+                result,
+                "departure_height_distribution",
+            )
+            rate_series = window.departure_distribution_plot._last_series
+            self.assertIsNotNone(rate_series)
+            self.assertEqual(rate_series[3][0].y, [2.0])
         finally:
             window.close()
 
@@ -431,6 +497,90 @@ class GuiTheorySettingsTests(unittest.TestCase):
                     self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 255, 255))
             self.assertFalse(plot.light_theme)
             self.assertNotEqual(plot.figure.get_facecolor()[:3], (1.0, 1.0, 1.0))
+        finally:
+            plot.close()
+
+    def test_png_preview_updates_point_text_and_grid_settings_immediately(self) -> None:
+        plot = PlotWidget()
+        try:
+            plot.plot_xy("original", "time", "volume", [0.0, 1.0], [1.0, 2.0])
+            dialog = GraphPngPreviewDialog(plot, ".")
+            try:
+                previous_size = dialog.point_size_spin.value()
+                dialog.point_size_spin.stepUp()
+                self.app.processEvents()
+
+                self.assertEqual(dialog.preview_plot.settings.point_size, previous_size + 1.0)
+                axis = dialog.preview_plot.figure.axes[0]
+                self.assertEqual(axis.collections[0].get_sizes()[0], previous_size + 1.0)
+
+                dialog.title_edit.setText("custom title")
+                dialog.x_label_edit.setText("custom x")
+                dialog.y_label_edit.setText("custom y")
+                dialog.title_font_size_spin.setValue(19)
+                dialog.axis_label_font_size_spin.setValue(15)
+                dialog.font_size_spin.setValue(12)
+                dialog.grid_alpha_spin.setValue(0.25)
+                dialog.grid_line_width_spin.setValue(1.7)
+                dialog.grid_line_style_combo.setCurrentText("破線")
+                dialog.x_tick_rotation_spin.setValue(30.0)
+                self.app.processEvents()
+
+                axis = dialog.preview_plot.figure.axes[0]
+                self.assertEqual(axis.get_title(), "custom title")
+                self.assertEqual(axis.get_xlabel(), "custom x")
+                self.assertEqual(axis.get_ylabel(), "custom y")
+                self.assertEqual(axis.title.get_fontsize(), 19)
+                self.assertEqual(axis.xaxis.label.get_fontsize(), 15)
+                self.assertEqual(axis.get_xticklabels()[0].get_fontsize(), 12)
+                self.assertEqual(axis.get_xticklabels()[0].get_rotation(), 30.0)
+                visible_grid_lines = [line for line in axis.get_xgridlines() if line.get_visible()]
+                self.assertTrue(visible_grid_lines)
+                self.assertEqual(visible_grid_lines[0].get_alpha(), 0.25)
+                self.assertEqual(visible_grid_lines[0].get_linewidth(), 1.7)
+                self.assertEqual(visible_grid_lines[0].get_linestyle(), "--")
+            finally:
+                dialog.close()
+        finally:
+            plot.close()
+
+    def test_png_preview_updates_series_legend_marker_and_line_style(self) -> None:
+        plot = PlotWidget()
+        try:
+            plot.plot_series(
+                "series",
+                "x",
+                "y",
+                [
+                    PlotSeries("points", [0.0, 1.0], [1.0, 2.0], marker="s"),
+                    PlotSeries("line", [0.0, 1.0], [2.0, 3.0], style="line", linestyle="--"),
+                ],
+            )
+            dialog = GraphPngPreviewDialog(plot, ".")
+            try:
+                dialog.marker_combo.setCurrentText("^")
+                dialog.marker_override_check.setChecked(True)
+                dialog.line_width_override_check.setChecked(True)
+                dialog.line_width_spin.setValue(3.0)
+                dialog.line_style_combo.setCurrentText("点線")
+                dialog.legend_font_size_spin.setValue(14)
+                dialog.legend_location_combo.setCurrentText("左上")
+                self.app.processEvents()
+
+                axis = dialog.preview_plot.figure.axes[0]
+                self.assertEqual(axis.collections[0].get_paths()[0].vertices.shape[0], 4)
+                self.assertEqual(axis.lines[0].get_linewidth(), 3.0)
+                self.assertEqual(axis.lines[0].get_linestyle(), ":")
+                legend = axis.get_legend()
+                self.assertIsNotNone(legend)
+                self.assertEqual(legend.get_texts()[0].get_fontsize(), 14)
+                self.assertEqual(legend._loc, 2)
+
+                dialog.legend_check.setChecked(False)
+                self.app.processEvents()
+                self.assertIsNone(dialog.preview_plot.figure.axes[0].get_legend())
+            finally:
+                dialog.close()
         finally:
             plot.close()
 

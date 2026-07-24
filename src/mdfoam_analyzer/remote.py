@@ -11,6 +11,7 @@ from .cache import is_cached_file_current, remote_cache_dir
 
 
 MESH_FILES = ("points", "faces", "owner", "neighbour")
+LAGRANGIAN_FILES = ("positions", "id", "origId", "origProcId")
 
 
 class RemoteError(RuntimeError):
@@ -201,12 +202,18 @@ def sync_remote_case(
     profile: RemoteProfile,
     remote_case: str,
     density_field: str,
+    include_lagrangian: bool = False,
     stop_requested=lambda: False,
     log=lambda message: None,
 ) -> Path:
     remote_case = normalize_remote_path(remote_case)
     local_case = remote_cache_dir(profile.host, profile.username, remote_case) / remote_name(remote_case)
-    required_files = _required_remote_files(sftp, remote_case, density_field)
+    required_files = _required_remote_files(
+        sftp,
+        remote_case,
+        density_field,
+        include_lagrangian=include_lagrangian,
+    )
     if not required_files:
         raise RemoteError(f"{remote_case}: 読み取り可能な {density_field} が見つかりません。")
 
@@ -244,7 +251,7 @@ def sync_remote_lagrangian_time(
 ) -> None:
     remote_case = normalize_remote_path(remote_case)
     files: list[RemoteFile] = []
-    for file_name in ("positions", "id"):
+    for file_name in LAGRANGIAN_FILES:
         remote_path = remote_join(
             remote_case,
             "main",
@@ -261,6 +268,16 @@ def sync_remote_lagrangian_time(
                     remote_join("main", time_name, "lagrangian", "moleculeCloud", file_name),
                 )
             )
+
+    id_list_remote = remote_join(remote_case, "main", "constant", "idList")
+    if is_remote_file(sftp, id_list_remote):
+        files.append(
+            _remote_file(
+                sftp,
+                id_list_remote,
+                remote_join("main", "constant", "idList"),
+            )
+        )
 
     downloaded = 0
     reused = 0
@@ -280,7 +297,12 @@ def sync_remote_lagrangian_time(
         log(f"{remote_name(remote_case)} {time_name}: Lagrangian {downloaded} ファイル取得, {reused} ファイル再利用")
 
 
-def _required_remote_files(sftp, remote_case: str, density_field: str) -> list[RemoteFile]:
+def _required_remote_files(
+    sftp,
+    remote_case: str,
+    density_field: str,
+    include_lagrangian: bool = False,
+) -> list[RemoteFile]:
     main_dir = remote_join(remote_case, "main")
     reconstructed_times = [
         time_dir
@@ -289,6 +311,8 @@ def _required_remote_files(sftp, remote_case: str, density_field: str) -> list[R
     ]
     if reconstructed_times:
         files = _mesh_files(sftp, main_dir, "main")
+        if include_lagrangian:
+            files.extend(_constant_molecule_files(sftp, main_dir, "main"))
         for time_dir in reconstructed_times:
             time_name = remote_name(time_dir)
             files.append(
@@ -298,9 +322,19 @@ def _required_remote_files(sftp, remote_case: str, density_field: str) -> list[R
                     remote_join("main", time_name, density_field),
                 )
             )
+            if include_lagrangian:
+                files.extend(
+                    _lagrangian_files(
+                        sftp,
+                        time_dir,
+                        remote_join("main", time_name),
+                    )
+                )
         return files
 
     files: list[RemoteFile] = []
+    if include_lagrangian:
+        files.extend(_constant_molecule_files(sftp, main_dir, "main"))
     for processor_name, processor in list_remote_dirs(sftp, main_dir):
         if not processor_name.startswith("processor"):
             continue
@@ -319,6 +353,60 @@ def _required_remote_files(sftp, remote_case: str, density_field: str) -> list[R
                     sftp,
                     remote_join(time_dir, density_field),
                     remote_join("main", processor_name, time_name, density_field),
+                )
+            )
+            if include_lagrangian:
+                files.extend(
+                    _lagrangian_files(
+                        sftp,
+                        time_dir,
+                        remote_join("main", processor_name, time_name),
+                    )
+                )
+    return files
+
+
+def _constant_molecule_files(
+    sftp,
+    remote_parent: str,
+    local_parent: str,
+) -> list[RemoteFile]:
+    remote_path = remote_join(remote_parent, "constant", "idList")
+    if not is_remote_file(sftp, remote_path):
+        return []
+    return [
+        _remote_file(
+            sftp,
+            remote_path,
+            remote_join(local_parent, "constant", "idList"),
+        )
+    ]
+
+
+def _lagrangian_files(
+    sftp,
+    remote_time_dir: str,
+    local_time_dir: str,
+) -> list[RemoteFile]:
+    files: list[RemoteFile] = []
+    for file_name in LAGRANGIAN_FILES:
+        remote_path = remote_join(
+            remote_time_dir,
+            "lagrangian",
+            "moleculeCloud",
+            file_name,
+        )
+        if is_remote_file(sftp, remote_path):
+            files.append(
+                _remote_file(
+                    sftp,
+                    remote_path,
+                    remote_join(
+                        local_time_dir,
+                        "lagrangian",
+                        "moleculeCloud",
+                        file_name,
+                    ),
                 )
             )
     return files

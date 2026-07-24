@@ -9,6 +9,10 @@ import pytest
 
 from mdfoam_analyzer import __version__
 from mdfoam_analyzer.analysis import AnalysisSettings, analyze_case
+from mdfoam_analyzer.molecular_departure import (
+    DepartureHeightBin,
+    MolecularDepartureResult,
+)
 from mdfoam_analyzer.provenance import (
     MANIFEST_FORMAT,
     PROJECT_FORMAT,
@@ -39,6 +43,12 @@ def test_analysis_settings_round_trip(tmp_path: Path) -> None:
         contact_fit_upper=0.85,
         contact_unwrap_xy=False,
         contact_average_percent=65.0,
+        departure_enabled=True,
+        departure_species="customWater",
+        departure_cutoff=5.0e-10,
+        departure_confirmation_frames=4,
+        departure_height_bins=12,
+        departure_bin_mode="equal_surface_area",
     )
     path = tmp_path / "mdfoam_project.json"
 
@@ -164,6 +174,25 @@ def test_manifest_contains_context_summary_and_no_ssh_secrets(
 ) -> None:
     settings = AnalysisSettings()
     result = analyze_case(CASE, settings)
+    result.departure_result = MolecularDepartureResult(
+        status="ok",
+        species_name="water",
+        bin_mode="equal_surface_area",
+        species_id=0,
+        frame_count=4,
+        height_bins=[
+            DepartureHeightBin(
+                0,
+                0.0,
+                1.0,
+                2,
+                1,
+                3.0,
+                2.0 / 3.0,
+                1.0 / 3.0,
+            )
+        ],
+    )
     remote_metadata = {
         "files": [
             {
@@ -206,6 +235,14 @@ def test_manifest_contains_context_summary_and_no_ssh_secrets(
     assert payload["cases"][0]["mesh_source"].startswith("/remote/case001/")
     assert payload["cases"][0]["result_summary"]["time_count"] == 4
     assert payload["cases"][0]["mesh_statistics"]["cell_count"] == 1
+    assert payload["cases"][0]["molecular_departure"]["frame_count"] == 4
+    assert (
+        payload["cases"][0]["molecular_departure"]["bin_mode"]
+        == "equal_surface_area"
+    )
+    assert payload["cases"][0]["molecular_departure"]["height_bins"][0][
+        "raw_count"
+    ] == 2
     assert "secret" not in text.lower()
     assert "key_path" not in text
     assert all(

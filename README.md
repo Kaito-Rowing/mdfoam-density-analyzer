@@ -65,6 +65,8 @@ The contact angle workflow is designed to approximate a previous process where c
 - Computes equivalent radius: `R_eq = (3V / (4*pi))^(1/3)`.
 - Computes contact angle, contact radius, and contact fit point count.
 - Computes evaporation completion time from consecutive zero-volume time steps.
+- Optionally tracks molecular departures from the droplet by `(origProcId, origId)`.
+- Plots departure-event height distributions and time-height maps.
 - Handles a single case or many cases under a parent directory.
 - Supports SSH/SFTP workflows for remote HPC results without running commands on the remote host.
 - Exports summary CSV, time-series CSV, graph PNG files, visualization PNG files, and visualization GIF files.
@@ -207,6 +209,28 @@ Contact angle and contact radius are calculated from density-threshold contour p
 
 This method is intended to approximate the older contour-points-plus-`Sesshoku6.py` workflow while keeping the full post-processing path inside Python.
 
+### Molecular Departure Analysis
+
+Molecular departure analysis is disabled by default because it reads every
+available Lagrangian frame. When enabled, it requires
+`lagrangian/moleculeCloud/positions`, `id`, `origId`, and `origProcId`, plus
+`constant/idList`.
+
+The selected species is grouped into distance-connected clusters using XY
+minimum-image periodic distances. The largest cluster containing at least one
+molecule in a cell above the density threshold is treated as the droplet.
+Each liquid-to-outside transition is recorded as a raw departure. A departure
+is confirmed after the configured number of consecutive outside frames, while
+recondensation and later departure create additional events.
+
+Event height is reported relative to the density-contour substrate height and
+normalized by the instantaneous droplet height. The output also includes
+radial position normalized by contact radius. For coarse output intervals, the
+last liquid-frame position is an estimate and the CSV records the corresponding
+time uncertainty. For output intervals around `1e-13 s` or less, the analyzer
+attempts to intersect the molecule trajectory segment with the fitted spherical
+interface.
+
 ## SSH/SFTP Remote Case Workflow
 
 The SSH mode is designed for remote HPC results when you want to analyze case outputs locally without running post-processing commands on the remote machine.
@@ -223,10 +247,20 @@ Current behavior:
 
 ## Outputs
 
-CSV export writes two files:
+CSV export writes the following analysis files:
 
 - `mdfoam_summary.csv`: one row per case, including maximum volume, final volume, evaporation time, initial/final valid contact angle, average contact angle, and initial/final valid contact radius.
 - `mdfoam_timeseries.csv`: one row per case and time, including time, volume, equivalent radius, selected cell count, total cell count, contact angle, contact radius, and contact fit point count.
+- `mdfoam_departure_events.csv`: one row per raw molecular departure, including identity, timing, position estimate, normalized height/radius, confirmation state, and quality flags.
+- `mdfoam_departure_height_bins.csv`: raw and confirmed event counts and area-time-normalized rates for each normalized-height bin.
+
+Height bins can be switched between equal normalized-height intervals and equal
+fitted-spherical-surface-area intervals. With the current spherical fit these
+boundaries are identical because a spherical band has
+`dA = 2*pi*R*dz`; the explicit mode records the intended normalization and
+keeps the calculation ready for future non-spherical surface models. The
+area-time display is an event number flux in `1/(m^2 s)`, not a velocity in
+`m/s`.
 
 The same output folder also contains `analysis_manifest.json`. It records the
 application version, analysis settings, input paths, file sizes and modification
