@@ -63,6 +63,7 @@ from .analysis import (
     CaseResult,
     TimeResult,
     analyze_case,
+    detect_batch_layout,
     discover_cases,
     discover_fields_for_cases,
     write_summary_csv,
@@ -249,6 +250,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fit状態": "fit status",
         "状態": "Status",
         "エラー": "Error",
+        "エラー / 警告": "Error / warning",
         "体積-時間": "Volume-Time",
         "等価半径-時間": "Equivalent radius-Time",
         "接触角-時間": "Contact angle-Time",
@@ -412,6 +414,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fit状態": "fit 状态",
         "状態": "状态",
         "エラー": "错误",
+        "エラー / 警告": "错误 / 警告",
         "体積-時間": "体积-时间",
         "等価半径-時間": "等效半径-时间",
         "接触角-時間": "接触角-时间",
@@ -575,6 +578,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fit状態": "estado fit",
         "状態": "Estado",
         "エラー": "Error",
+        "エラー / 警告": "Error / advertencia",
         "体積-時間": "Volumen-Tiempo",
         "等価半径-時間": "Radio equivalente-Tiempo",
         "接触角-時間": "Ángulo-Tiempo",
@@ -738,6 +742,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fit状態": "fit स्थिति",
         "状態": "स्थिति",
         "エラー": "त्रुटि",
+        "エラー / 警告": "त्रुटि / चेतावनी",
         "体積-時間": "आयतन-समय",
         "等価半径-時間": "समतुल्य त्रिज्या-समय",
         "接触角-時間": "संपर्क कोण-समय",
@@ -1254,6 +1259,37 @@ class AnalyzerWorker(QObject):
 
             total = len(self.cases)
             cache_session = AnalysisCacheSession(log=self.log.emit)
+            try:
+                layout_profile = detect_batch_layout(
+                    [Path(case) for case in self.cases],
+                    self.settings,
+                )
+            except Exception as exc:
+                message = f"バッチのセル構成を判定できませんでした: {exc}"
+                self.log.emit(message)
+                for index, case in enumerate(self.cases, start=1):
+                    case_path = Path(case)
+                    self.case_finished.emit(
+                        CaseResult(
+                            case_name=case_path.name,
+                            case_dir=case_path,
+                            status="error",
+                            error=message,
+                            contact_average_percent=(
+                                self.settings.contact_average_percent
+                            ),
+                            source_case_path=str(case_path),
+                        )
+                    )
+                    self.progress.emit(index, total)
+                return
+            self.log.emit(
+                "バッチセル構成: "
+                f"{layout_profile.mode}, "
+                f"総セル数={layout_profile.expected_total_cells}, "
+                f"processor数={layout_profile.processor_count}, "
+                f"判定元={Path(layout_profile.source_case).name}"
+            )
             for index, case in enumerate(self.cases, start=1):
                 if self._stop_requested:
                     self.log.emit("残りのケースを解析せずに停止しました。")
@@ -1265,6 +1301,7 @@ class AnalyzerWorker(QObject):
                     stop_requested=lambda: self._stop_requested,
                     log=self.log.emit,
                     cache_session=cache_session,
+                    layout_profile=layout_profile,
                 )
                 self.case_finished.emit(result)
                 self.progress.emit(index, total)
@@ -3293,7 +3330,7 @@ class MainWindow(QMainWindow):
             "fit R^2",
             "fit状態",
             "状態",
-            "エラー",
+            "エラー / 警告",
         ]
         self.table.setHorizontalHeaderLabels(self.table_header_sources)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -4475,6 +4512,7 @@ class MainWindow(QMainWindow):
         row = self.table.rowCount()
         self.table.insertRow(row)
         comparison = self._theory_comparison(result)
+        messages = ([result.error] if result.error else []) + list(result.warnings)
         values = [
             result.case_name,
             str(result.time_count),
@@ -4490,8 +4528,8 @@ class MainWindow(QMainWindow):
             _fmt_optional(comparison.fit.rmse),
             _fmt_optional(comparison.fit.r2),
             comparison.fit.status,
-            _status_label(result.status),
-            result.error,
+            _status_label(result.status, bool(result.warnings)),
+            " | ".join(messages),
         ]
         for column, value in enumerate(values):
             item = QTableWidgetItem(value)
@@ -5748,7 +5786,9 @@ def _fmt_optional(value: float | None) -> str:
     return "" if value is None else _fmt(value)
 
 
-def _status_label(status: str) -> str:
+def _status_label(status: str, has_warnings: bool = False) -> str:
+    if status == "ok" and has_warnings:
+        return "完了（警告あり）"
     labels = {
         "ok": "完了",
         "error": "エラー",

@@ -16,6 +16,7 @@ from .openfoam import (
     numeric_time_dirs,
     read_mesh_volumes,
     read_scalar_internal_field,
+    resolve_case_data_dir,
     strip_comments,
 )
 
@@ -307,7 +308,12 @@ def analyze_molecular_departures(
         bin_mode=settings.departure_bin_mode,
     )
     try:
-        main_dir = case_dir / "main"
+        main_dir = resolve_case_data_dir(case_dir)
+        if main_dir is None:
+            raise OpenFoamParseError(
+                "OpenFOAM data directory not found "
+                "(expected case/main or a directly selected OpenFOAM case root)"
+            )
         id_list_path = main_dir / "constant" / "idList"
         species_names: list[str]
         if id_list_path.is_file():

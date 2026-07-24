@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import csv
 import math
 from pathlib import Path
+import shutil
 
 import pytest
 
 from mdfoam_analyzer.analysis import (
+    AnalysisLayoutProfile,
     AnalysisSettings,
     analyze_case,
+    detect_analysis_layout,
+    detect_batch_layout,
     discover_cases,
     discover_fields_for_cases,
     find_evaporation_time,
+    write_summary_csv,
+    write_timeseries_csv,
 )
 from mdfoam_analyzer.openfoam import equivalent_radius
 
@@ -51,6 +58,25 @@ boundaryField
 def test_discovers_parent_and_single_case() -> None:
     assert discover_cases(PARENT) == [CASE.resolve()]
     assert discover_cases(CASE) == [CASE.resolve()]
+
+
+def test_discovers_and_analyzes_direct_openfoam_case_root(tmp_path: Path) -> None:
+    direct_case = tmp_path / "v12"
+    shutil.copytree(CASE / "main", direct_case)
+
+    assert discover_cases(direct_case) == [direct_case.resolve()]
+    assert discover_cases(tmp_path) == [direct_case.resolve()]
+    assert discover_fields_for_cases([direct_case]) == ["rhoM_water"]
+
+    result = analyze_case(
+        direct_case,
+        AnalysisSettings(consecutive_zero_count=3),
+    )
+
+    assert result.status == "ok"
+    assert result.case_name == "v12"
+    assert result.time_count == 4
+    assert result.evaporation_time == 1.0
 
 
 def test_discovers_fields_for_minimal_case() -> None:
@@ -103,6 +129,83 @@ def test_fallback_manual_cell_volume_when_mesh_is_unavailable(tmp_path: Path) ->
     assert result.rows[0].total_cell_count == 2
     assert result.rows[0].contact_angle_deg is None
     assert result.rows[0].contact_radius is None
+
+
+def test_mismatched_time_is_skipped_and_breaks_zero_sequence(
+    tmp_path: Path,
+) -> None:
+    case = tmp_path / "case_with_fragment"
+    shutil.copytree(CASE, case)
+    _write_minimal_field(case / "main" / "2" / "rhoM_water", [0.0, 0.0])
+    _write_minimal_field(case / "main" / "4" / "rhoM_water", [0.0])
+
+    result = analyze_case(
+        case,
+        AnalysisSettings(consecutive_zero_count=2),
+    )
+
+    assert result.status == "ok"
+    assert [row.time for row in result.rows] == [0.0, 1.0, 3.0, 4.0]
+    assert result.evaporation_time == 3.0
+    assert len(result.warnings) == 1
+    assert len(result.skipped_times) == 1
+    skipped = result.skipped_times[0]
+    assert skipped.time == 2.0
+    assert skipped.density_count == 2
+    assert skipped.expected_cell_count == 1
+
+    summary_path = tmp_path / "summary.csv"
+    timeseries_path = tmp_path / "timeseries.csv"
+    write_summary_csv(summary_path, [result])
+    write_timeseries_csv(timeseries_path, [result])
+    with summary_path.open(encoding="utf-8-sig", newline="") as handle:
+        summary = next(csv.DictReader(handle))
+    with timeseries_path.open(encoding="utf-8-sig", newline="") as handle:
+        timeseries = list(csv.DictReader(handle))
+    assert summary["warning_count"] == "1"
+    assert summary["skipped_time_count"] == "1"
+    assert summary["skipped_times"] == "2"
+    assert [float(row["time"]) for row in timeseries] == [0.0, 1.0, 3.0, 4.0]
+
+
+def test_all_mismatched_times_return_error_with_batch_profile(
+    tmp_path: Path,
+) -> None:
+    case = tmp_path / "all_fragments"
+    shutil.copytree(CASE, case)
+    for time_name in ("0", "1", "2", "3"):
+        _write_minimal_field(
+            case / "main" / time_name / "rhoM_water",
+            [0.0, 0.0],
+        )
+    profile = detect_analysis_layout(CASE, AnalysisSettings())
+
+    result = analyze_case(case, AnalysisSettings(), layout_profile=profile)
+
+    assert result.status == "error"
+    assert result.rows == []
+    assert len(result.skipped_times) == 4
+    assert "No valid rhoM_water" in result.error
+
+
+def test_batch_layout_uses_first_analyzable_case_and_rejects_cell_mismatch() -> None:
+    profile = detect_batch_layout([CASE], AnalysisSettings())
+
+    assert profile.mode == "reconstructed"
+    assert profile.expected_total_cells == 1
+    assert profile.processor_count == 0
+    assert Path(profile.source_case) == CASE.resolve()
+
+    incompatible = AnalysisLayoutProfile(
+        mode="reconstructed",
+        expected_total_cells=2,
+        processor_count=0,
+        source_case="synthetic-first-case",
+    )
+    result = analyze_case(CASE, AnalysisSettings(), layout_profile=incompatible)
+
+    assert result.status == "error"
+    assert "Batch layout mismatch" in result.error
 
 
 def test_evaporation_time_uses_first_time_in_consecutive_zero_run() -> None:

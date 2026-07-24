@@ -119,6 +119,47 @@ def numeric_time_dirs(root: Path) -> list[tuple[float, Path]]:
     return result
 
 
+def is_openfoam_data_dir(path: Path) -> bool:
+    """Return whether *path* looks like an OpenFOAM case data directory."""
+    if not path.is_dir():
+        return False
+
+    if (path / "constant" / "polyMesh").is_dir():
+        return True
+    if (path / "constant").is_dir() and (path / "system").is_dir():
+        return True
+
+    for _, time_dir in numeric_time_dirs(path):
+        if any(
+            field.is_file() and field.name.startswith(("rhoM", "rhoN"))
+            for field in time_dir.iterdir()
+        ):
+            return True
+
+    for processor in path.glob("processor*"):
+        if not processor.is_dir():
+            continue
+        if (processor / "constant" / "polyMesh").is_dir():
+            return True
+        for _, time_dir in numeric_time_dirs(processor):
+            if any(
+                field.is_file() and field.name.startswith(("rhoM", "rhoN"))
+                for field in time_dir.iterdir()
+            ):
+                return True
+    return False
+
+
+def resolve_case_data_dir(case_dir: Path) -> Path | None:
+    """Resolve either ``case/main`` or a directly selected OpenFOAM case root."""
+    main_dir = case_dir / "main"
+    if main_dir.is_dir():
+        return main_dir
+    if is_openfoam_data_dir(case_dir):
+        return case_dir
+    return None
+
+
 def discover_density_fields(main_dir: Path) -> list[str]:
     names: set[str] = set()
     for _, time_dir in numeric_time_dirs(main_dir):
@@ -140,6 +181,15 @@ def discover_density_fields(main_dir: Path) -> list[str]:
                 break
 
     return sorted(names)
+
+
+def read_mesh_cell_count(poly_mesh_dir: Path) -> int:
+    owner = _read_labels(poly_mesh_dir / "owner")
+    neighbour_path = poly_mesh_dir / "neighbour"
+    neighbour = _read_labels(neighbour_path) if neighbour_path.exists() else []
+    if not owner and not neighbour:
+        raise OpenFoamParseError(f"No mesh cells found: {poly_mesh_dir}")
+    return max(owner + neighbour) + 1
 
 
 def read_mesh_volumes(poly_mesh_dir: Path) -> MeshVolumeInfo:

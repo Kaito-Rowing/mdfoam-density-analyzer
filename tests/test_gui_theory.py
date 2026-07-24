@@ -23,8 +23,14 @@ try:
 except ImportError as exc:
     raise unittest.SkipTest(f"PySide6 GUI runtime is unavailable: {exc}") from exc
 
-from mdfoam_analyzer.analysis import AnalysisSettings, CaseResult, TimeResult
+from mdfoam_analyzer.analysis import (
+    AnalysisLayoutProfile,
+    AnalysisSettings,
+    CaseResult,
+    TimeResult,
+)
 from mdfoam_analyzer.gui import (
+    AnalyzerWorker,
     PNG_PREVIEW_PIXELS_PER_INCH,
     CombinedPlotWidget,
     GraphPngPreviewDialog,
@@ -147,6 +153,37 @@ class GuiTheorySettingsTests(unittest.TestCase):
                 )
         finally:
             window.close()
+
+    def test_local_worker_reuses_one_batch_layout_profile(self) -> None:
+        cases = [Path("case_a"), Path("case_b")]
+        settings = AnalysisSettings()
+        profile = AnalysisLayoutProfile(
+            mode="reconstructed",
+            expected_total_cells=4352,
+            processor_count=0,
+            source_case="case_a",
+        )
+        received_profiles = []
+
+        def fake_analyze_case(case, run_settings, **kwargs):
+            received_profiles.append(kwargs.get("layout_profile"))
+            return CaseResult(Path(case).name, Path(case), "ok")
+
+        with (
+            patch(
+                "mdfoam_analyzer.gui.detect_batch_layout",
+                return_value=profile,
+            ) as detect,
+            patch(
+                "mdfoam_analyzer.gui.analyze_case",
+                side_effect=fake_analyze_case,
+            ),
+        ):
+            worker = AnalyzerWorker(cases, settings)
+            worker.run()
+
+        detect.assert_called_once_with(cases, settings)
+        self.assertEqual(received_profiles, [profile, profile])
 
     def test_departure_distribution_plot_switches_between_count_and_rate(self) -> None:
         window = MainWindow()
@@ -354,6 +391,27 @@ class GuiTheorySettingsTests(unittest.TestCase):
             self.assertEqual(window.kpi_volume_value.text(), "3")
             self.assertEqual(window.kpi_evaporation_value.text(), "2.5")
             self.assertEqual(window.kpi_contact_value.text(), "82")
+        finally:
+            window.close()
+
+    def test_result_table_shows_completed_with_warning(self) -> None:
+        window = MainWindow()
+        try:
+            result = CaseResult(
+                case_name="case_warning",
+                case_dir=Path(),
+                status="ok",
+                rows=[TimeResult(0.0, 1.0, 1.0, 1, 1)],
+                warnings=["Skipped one incomplete time field"],
+            )
+
+            window.add_result_row(result)
+
+            self.assertEqual(window.table.item(0, 14).text(), "完了（警告あり）")
+            self.assertIn(
+                "Skipped one incomplete time field",
+                window.table.item(0, 15).text(),
+            )
         finally:
             window.close()
 

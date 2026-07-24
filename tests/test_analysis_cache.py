@@ -50,6 +50,38 @@ def test_complete_cache_hit_matches_uncached_result_and_skips_calculation(
     assert second == first
 
 
+def test_warning_and_skipped_times_survive_complete_cache_hit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = _copy_case(tmp_path)
+    field = case / "main" / "2" / "rhoM_water"
+    text = field.read_text(encoding="utf-8")
+    field.write_text(
+        text.replace("\n1\n(\n0\n)", "\n2\n(\n0\n0\n)"),
+        encoding="utf-8",
+    )
+    cache_root = tmp_path / "cache"
+    first = analyze_case(
+        case,
+        AnalysisSettings(),
+        cache_session=AnalysisCacheSession(cache_root),
+    )
+
+    monkeypatch.setattr(analysis, "read_scalar_internal_field", _fail)
+    monkeypatch.setattr(analysis, "read_mesh_volumes", _fail)
+    second = analyze_case(
+        case,
+        AnalysisSettings(),
+        cache_session=AnalysisCacheSession(cache_root),
+    )
+
+    assert first.status == "ok"
+    assert second == first
+    assert len(second.warnings) == 1
+    assert [item.time for item in second.skipped_times] == [2.0]
+
+
 def test_threshold_change_reuses_density_and_mesh_but_recalculates_rows(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

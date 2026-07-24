@@ -19,6 +19,7 @@ from .openfoam import (
     numeric_time_dirs,
     read_mesh_volumes,
     read_scalar_internal_field,
+    resolve_case_data_dir,
     strip_comments,
 )
 
@@ -61,8 +62,8 @@ class DownsampleResult:
 
 
 def case_time_dirs(case_dir: Path) -> list[tuple[float, Path]]:
-    main_dir = case_dir / "main"
-    return numeric_time_dirs(main_dir)
+    data_dir = resolve_case_data_dir(case_dir)
+    return numeric_time_dirs(data_dir) if data_dir is not None else []
 
 
 def find_time_dir(case_dir: Path, time_value: float) -> Path | None:
@@ -81,7 +82,13 @@ def load_visualization_frame(
     if time_dir is None:
         raise OpenFoamParseError(f"時刻ディレクトリが見つかりません: {time_value}")
 
-    mesh_info = read_mesh_volumes(case_dir / "main" / "constant" / "polyMesh")
+    data_dir = resolve_case_data_dir(case_dir)
+    if data_dir is None:
+        raise OpenFoamParseError(
+            "OpenFOAMデータディレクトリが見つかりません "
+            "(case/main または OpenFOAM ケース直下を指定してください)"
+        )
+    mesh_info = read_mesh_volumes(data_dir / "constant" / "polyMesh")
     density_path = time_dir / settings.density_field
     selected_centers: list[tuple[float, float, float]] = []
     contact_points: list[tuple[float, float, float]] | None = None

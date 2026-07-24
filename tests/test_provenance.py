@@ -8,7 +8,12 @@ import shutil
 import pytest
 
 from mdfoam_analyzer import __version__
-from mdfoam_analyzer.analysis import AnalysisSettings, analyze_case
+from mdfoam_analyzer.analysis import (
+    AnalysisSettings,
+    SkippedTime,
+    analyze_case,
+    detect_analysis_layout,
+)
 from mdfoam_analyzer.molecular_departure import (
     DepartureHeightBin,
     MolecularDepartureResult,
@@ -155,9 +160,14 @@ def test_processor_mesh_statistics_are_aggregated(tmp_path: Path) -> None:
         field.parent.mkdir(parents=True)
         shutil.copy2(source_field, field)
 
-    result = analyze_case(case, AnalysisSettings())
+    settings = AnalysisSettings()
+    profile = detect_analysis_layout(case, settings)
+    result = analyze_case(case, settings, layout_profile=profile)
 
     assert result.status == "ok"
+    assert profile.mode == "processors"
+    assert profile.processor_count == 2
+    assert profile.expected_total_cells == 2
     assert result.mesh_statistics is not None
     assert result.mesh_statistics.mesh_count == 2
     assert result.mesh_statistics.cell_count == 2
@@ -174,6 +184,16 @@ def test_manifest_contains_context_summary_and_no_ssh_secrets(
 ) -> None:
     settings = AnalysisSettings()
     result = analyze_case(CASE, settings)
+    result.warnings = ["Skipped one incomplete time field"]
+    result.skipped_times = [
+        SkippedTime(
+            time=2.5,
+            source_path="/remote/case001/main/2.5/rhoM_water",
+            density_count=68,
+            expected_cell_count=4352,
+            reason="processor fragment",
+        )
+    ]
     result.departure_result = MolecularDepartureResult(
         status="ok",
         species_name="water",
@@ -235,6 +255,10 @@ def test_manifest_contains_context_summary_and_no_ssh_secrets(
     assert payload["cases"][0]["mesh_source"].startswith("/remote/case001/")
     assert payload["cases"][0]["result_summary"]["time_count"] == 4
     assert payload["cases"][0]["mesh_statistics"]["cell_count"] == 1
+    assert payload["cases"][0]["warnings"] == [
+        "Skipped one incomplete time field"
+    ]
+    assert payload["cases"][0]["skipped_times"][0]["density_count"] == 68
     assert payload["cases"][0]["molecular_departure"]["frame_count"] == 4
     assert (
         payload["cases"][0]["molecular_departure"]["bin_mode"]

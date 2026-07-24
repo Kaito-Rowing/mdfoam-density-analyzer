@@ -137,6 +137,8 @@ def _case_payload(result: CaseResult) -> dict[str, Any]:
         "source_case_path": result.source_case_path,
         "status": result.status,
         "error": result.error,
+        "warnings": list(result.warnings),
+        "skipped_times": [asdict(item) for item in result.skipped_times],
         "field_class": result.field_class,
         "mesh_source": result.mesh_source,
         "volume_mode": result.volume_mode,

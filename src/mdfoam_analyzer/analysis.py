@@ -6,7 +6,7 @@ import csv
 import math
 import platform
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 import numpy as np
 
@@ -18,15 +18,17 @@ from .openfoam import (
     equivalent_radius,
     numeric_time_dirs,
     read_field_info,
+    read_mesh_cell_count,
     read_mesh_volumes,
     read_scalar_internal_field,
+    resolve_case_data_dir,
 )
 
 if TYPE_CHECKING:
     from .molecular_departure import MolecularDepartureResult
 
 
-ANALYSIS_ALGORITHM_VERSION = 1
+ANALYSIS_ALGORITHM_VERSION = 2
 DENSITY_PARSER_VERSION = 1
 MESH_PARSER_VERSION = 1
 MESH_FILE_NAMES = ("points", "faces", "owner", "neighbour")
@@ -82,6 +84,23 @@ class InputFileRecord:
 
 
 @dataclass(frozen=True)
+class AnalysisLayoutProfile:
+    mode: str
+    expected_total_cells: int
+    processor_count: int
+    source_case: str
+
+
+@dataclass(frozen=True)
+class SkippedTime:
+    time: float
+    source_path: str
+    density_count: int
+    expected_cell_count: int
+    reason: str
+
+
+@dataclass(frozen=True)
 class MeshStatistics:
     mesh_count: int
     cell_count: int
@@ -128,6 +147,8 @@ class CaseResult:
     input_files: list[InputFileRecord] = field(default_factory=list)
     mesh_statistics: MeshStatistics | None = None
     departure_result: MolecularDepartureResult | None = None
+    warnings: list[str] = field(default_factory=list)
+    skipped_times: list[SkippedTime] = field(default_factory=list)
 
     @property
     def time_count(self) -> int:
@@ -181,13 +202,13 @@ class CaseResult:
 
 def discover_cases(parent: Path) -> list[Path]:
     parent = parent.resolve()
-    if (parent / "main").is_dir():
+    if resolve_case_data_dir(parent) is not None:
         return [parent]
 
     cases = [
         child
         for child in parent.iterdir()
-        if child.is_dir() and (child / "main").is_dir()
+        if child.is_dir() and resolve_case_data_dir(child) is not None
     ]
     return sorted(cases, key=lambda item: item.name)
 
@@ -195,20 +216,163 @@ def discover_cases(parent: Path) -> list[Path]:
 def discover_fields_for_cases(cases: list[Path]) -> list[str]:
     names: set[str] = set()
     for case in cases:
-        names.update(discover_density_fields(case / "main"))
+        data_dir = resolve_case_data_dir(case)
+        if data_dir is not None:
+            names.update(discover_density_fields(data_dir))
     if "rhoM_water" in names:
         return ["rhoM_water"] + sorted(name for name in names if name != "rhoM_water")
     return sorted(names)
 
 
-def _cache_input_paths(main_dir: Path, density_field: str) -> list[Path]:
+def detect_analysis_layout(
+    case_dir: Path,
+    settings: AnalysisSettings,
+) -> AnalysisLayoutProfile:
+    case_dir = case_dir.resolve()
+    main_dir = resolve_case_data_dir(case_dir)
+    if main_dir is None:
+        raise OpenFoamParseError(
+            "OpenFOAM data directory not found "
+            "(expected case/main or a directly selected OpenFOAM case root)"
+        )
+
+    reconstructed = [
+        time_dir / settings.density_field
+        for _, time_dir in numeric_time_dirs(main_dir)
+        if (time_dir / settings.density_field).is_file()
+    ]
+    reconstructed_error = ""
+    if reconstructed:
+        try:
+            expected_cells = _layout_cell_count(
+                main_dir / "constant" / "polyMesh",
+                settings,
+                reconstructed,
+            )
+            if not any(
+                _field_count_is_compatible(path, expected_cells)
+                for path in reconstructed
+            ):
+                counts = sorted(
+                    {
+                        info.value_count
+                        for info in (read_field_info(path) for path in reconstructed)
+                        if info.value_count is not None
+                    }
+                )
+                raise OpenFoamParseError(
+                    f"reconstructed density counts {counts} do not match "
+                    f"mesh cell count {expected_cells}"
+                )
+            return AnalysisLayoutProfile(
+                mode="reconstructed",
+                expected_total_cells=expected_cells,
+                processor_count=0,
+                source_case=str(case_dir),
+            )
+        except Exception as exc:
+            reconstructed_error = str(exc)
+
+    processors = sorted(
+        path for path in main_dir.glob("processor*") if path.is_dir()
+    )
+    if processors:
+        total_cells = 0
+        for processor in processors:
+            fields = [
+                time_dir / settings.density_field
+                for _, time_dir in numeric_time_dirs(processor)
+                if (time_dir / settings.density_field).is_file()
+            ]
+            if not fields:
+                raise OpenFoamParseError(
+                    f"{processor.name}: no {settings.density_field} time fields found"
+                )
+            expected_cells = _layout_cell_count(
+                processor / "constant" / "polyMesh",
+                settings,
+                fields,
+            )
+            if not any(
+                _field_count_is_compatible(path, expected_cells)
+                for path in fields
+            ):
+                raise OpenFoamParseError(
+                    f"{processor.name}: no density field matches "
+                    f"mesh cell count {expected_cells}"
+                )
+            total_cells += expected_cells
+        return AnalysisLayoutProfile(
+            mode="processors",
+            expected_total_cells=total_cells,
+            processor_count=len(processors),
+            source_case=str(case_dir),
+        )
+
+    detail = f": {reconstructed_error}" if reconstructed_error else ""
+    raise OpenFoamParseError(
+        f"No usable {settings.density_field} layout found in {case_dir}{detail}"
+    )
+
+
+def detect_batch_layout(
+    cases: Iterable[Path],
+    settings: AnalysisSettings,
+) -> AnalysisLayoutProfile:
+    errors: list[str] = []
+    for case in cases:
+        try:
+            return detect_analysis_layout(Path(case), settings)
+        except Exception as exc:
+            errors.append(f"{Path(case).name}: {exc}")
+    detail = "; ".join(errors) if errors else "no cases were provided"
+    raise OpenFoamParseError(f"No analyzable case was found for batch layout: {detail}")
+
+
+def _layout_cell_count(
+    poly_mesh_dir: Path,
+    settings: AnalysisSettings,
+    field_paths: list[Path],
+) -> int:
+    first_nonuniform_count = next(
+        (
+            info.value_count
+            for info in (read_field_info(path) for path in field_paths)
+            if info.value_count is not None
+        ),
+        None,
+    )
+    try:
+        return read_mesh_cell_count(poly_mesh_dir)
+    except Exception as mesh_error:
+        fallback = settings.fallback_cell_volume()
+        if fallback is None or first_nonuniform_count is None:
+            raise OpenFoamParseError(
+                f"Cell volumes unavailable from mesh and no usable manual "
+                f"fallback was provided: {mesh_error}"
+            ) from mesh_error
+        return first_nonuniform_count
+
+
+def _field_count_is_compatible(path: Path, expected_cells: int) -> bool:
+    info = read_field_info(path)
+    if not info.is_cell_field:
+        return False
+    return info.value_count is None or info.value_count == expected_cells
+
+
+def _cache_input_paths(
+    main_dir: Path,
+    density_field: str,
+    layout_profile: AnalysisLayoutProfile,
+) -> list[Path]:
     reconstructed = [
         time_dir / density_field
         for _, time_dir in numeric_time_dirs(main_dir)
         if (time_dir / density_field).is_file()
     ]
     paths: list[Path] = []
-    if reconstructed:
+    if layout_profile.mode == "reconstructed":
         paths.extend(reconstructed)
         mesh_dir = main_dir / "constant" / "polyMesh"
         paths.extend(
@@ -242,6 +406,7 @@ def _result_cache_key(
     case_dir: Path,
     settings: AnalysisSettings,
     fingerprints: dict[Path, FileFingerprint],
+    layout_profile: AnalysisLayoutProfile,
 ) -> str:
     return cache_session.key(
         {
@@ -253,6 +418,7 @@ def _result_cache_key(
             },
             "case_path": str(case_dir.resolve()),
             "settings": asdict(settings),
+            "layout_profile": asdict(layout_profile),
             "inputs": [
                 {
                     "relative_path": path.relative_to(case_dir).as_posix(),
@@ -422,6 +588,8 @@ def _case_result_cache_payload(
             "contact_average_percent": result.contact_average_percent,
             "source_case_path": result.source_case_path,
             "mesh_statistics": mesh,
+            "warnings": list(result.warnings),
+            "skipped_times": [asdict(item) for item in result.skipped_times],
             "input_relative_paths": [
                 record.relative_path for record in result.input_files
             ],
@@ -506,6 +674,27 @@ def _restore_case_result(
                 mtime=fingerprint.mtime,
             )
         )
+    raw_warnings = metadata.get("warnings", [])
+    if not isinstance(raw_warnings, list) or not all(
+        isinstance(item, str) for item in raw_warnings
+    ):
+        raise ValueError("invalid cached warning list")
+    raw_skipped_times = metadata.get("skipped_times", [])
+    if not isinstance(raw_skipped_times, list):
+        raise ValueError("invalid cached skipped time list")
+    skipped_times: list[SkippedTime] = []
+    for item in raw_skipped_times:
+        if not isinstance(item, dict):
+            raise ValueError("invalid cached skipped time")
+        skipped_times.append(
+            SkippedTime(
+                time=float(item["time"]),
+                source_path=str(item["source_path"]),
+                density_count=int(item["density_count"]),
+                expected_cell_count=int(item["expected_cell_count"]),
+                reason=str(item["reason"]),
+            )
+        )
     return CaseResult(
         case_name=case_dir.name,
         case_dir=case_dir,
@@ -524,6 +713,8 @@ def _restore_case_result(
         source_case_path=str(case_dir),
         input_files=input_records,
         mesh_statistics=mesh_statistics,
+        warnings=list(raw_warnings),
+        skipped_times=skipped_times,
     )
 
 
@@ -533,6 +724,7 @@ def analyze_case(
     stop_requested=lambda: False,
     log=lambda message: None,
     cache_session: AnalysisCacheSession | None = None,
+    layout_profile: AnalysisLayoutProfile | None = None,
 ) -> CaseResult:
     case_dir = case_dir.resolve()
     result = CaseResult(
@@ -542,10 +734,23 @@ def analyze_case(
         contact_average_percent=settings.contact_average_percent,
         source_case_path=str(case_dir.resolve()),
     )
-    main_dir = case_dir / "main"
-    if not main_dir.is_dir():
+    main_dir = resolve_case_data_dir(case_dir)
+    if main_dir is None:
         result.status = "error"
-        result.error = "main directory not found"
+        result.error = (
+            "OpenFOAM data directory not found "
+            "(expected case/main or a directly selected OpenFOAM case root)"
+        )
+        return result
+    try:
+        active_layout = layout_profile or detect_analysis_layout(case_dir, settings)
+    except Exception as exc:
+        result.status = "error"
+        result.error = str(exc)
+        return result
+    if active_layout.mode not in {"reconstructed", "processors"}:
+        result.status = "error"
+        result.error = f"Unsupported analysis layout: {active_layout.mode}"
         return result
 
     if cache_session is not None:
@@ -558,7 +763,11 @@ def analyze_case(
             cache_session is not None and not settings.departure_enabled
         )
         if cache_session is not None:
-            input_paths = _cache_input_paths(main_dir, settings.density_field)
+            input_paths = _cache_input_paths(
+                main_dir,
+                settings.density_field,
+                active_layout,
+            )
             fingerprints = cache_session.fingerprints(input_paths, stop_requested)
             if stop_requested():
                 result.status = "stopped"
@@ -569,6 +778,7 @@ def analyze_case(
                 case_dir,
                 settings,
                 fingerprints,
+                active_layout,
             )
             cached_result = (
                 cache_session.load_result(result_cache_key)
@@ -587,35 +797,53 @@ def analyze_case(
                     cache_session.invalidate("result", result_cache_key, exc)
                 else:
                     log(f"{case_dir.name}: local analysis cache hit")
+                    for warning in restored.warnings:
+                        log(f"{case_dir.name}: warning: {warning}")
                     cache_session.commit_case()
                     return restored
             log(f"{case_dir.name}: local analysis cache miss")
 
-        reconstructed = _analyze_reconstructed(
-            main_dir,
-            settings,
-            stop_requested,
-            log,
-            cache_session,
-            fingerprints,
-        )
-        if reconstructed:
-            rows, mesh_info, field_class, input_paths = reconstructed
+        if active_layout.mode == "reconstructed":
+            reconstructed = _analyze_reconstructed(
+                main_dir,
+                settings,
+                active_layout,
+                stop_requested,
+                log,
+                cache_session,
+                fingerprints,
+            )
+            if reconstructed is None:
+                raise OpenFoamParseError(
+                    "Batch layout mismatch: reconstructed density fields "
+                    f"were expected from {active_layout.source_case}"
+                )
+            rows, mesh_info, field_class, input_paths, skipped_times = reconstructed
             result.rows = rows
+            result.skipped_times = skipped_times
             result.mesh_source = mesh_info.source
             result.volume_mode = _volume_mode_label(mesh_info)
             result.field_class = field_class
             result.mesh_statistics = _mesh_statistics([mesh_info], result.volume_mode)
         else:
-            rows, source, field_class, input_paths, mesh_infos = _analyze_processors(
+            (
+                rows,
+                source,
+                field_class,
+                input_paths,
+                mesh_infos,
+                skipped_times,
+            ) = _analyze_processors(
                 main_dir,
                 settings,
+                active_layout,
                 stop_requested,
                 log,
                 cache_session,
                 fingerprints,
             )
             result.rows = rows
+            result.skipped_times = skipped_times
             result.mesh_source = source
             result.volume_mode = "processor meshes"
             result.field_class = field_class
@@ -626,17 +854,27 @@ def analyze_case(
                 )
 
         result.input_files = _input_file_records(case_dir, input_paths)
+        if result.skipped_times:
+            result.warnings.append(_skipped_time_warning(result.skipped_times))
+            log(f"{case_dir.name}: warning: {result.warnings[-1]}")
 
         if stop_requested():
             result.status = "stopped"
         elif not result.rows:
             result.status = "error"
-            result.error = f"No readable {settings.density_field} time fields found"
+            if result.skipped_times:
+                result.error = (
+                    f"No valid {settings.density_field} time fields remained; "
+                    f"{len(result.skipped_times)} mismatched time fields were skipped"
+                )
+            else:
+                result.error = f"No readable {settings.density_field} time fields found"
         else:
             result.evaporation_time = find_evaporation_time(
                 result.rows,
                 settings.zero_tolerance,
                 settings.consecutive_zero_count,
+                skipped_times=(item.time for item in result.skipped_times),
             )
             result.status = "ok"
             if settings.departure_enabled:
@@ -701,11 +939,18 @@ def analyze_case(
 def _analyze_reconstructed(
     main_dir: Path,
     settings: AnalysisSettings,
+    layout_profile: AnalysisLayoutProfile,
     stop_requested,
     log,
     cache_session: AnalysisCacheSession | None = None,
     fingerprints: dict[Path, FileFingerprint] | None = None,
-) -> tuple[list[TimeResult], MeshVolumeInfo, str, list[Path]] | None:
+) -> tuple[
+    list[TimeResult],
+    MeshVolumeInfo,
+    str,
+    list[Path],
+    list[SkippedTime],
+] | None:
     fingerprints = fingerprints or {}
     time_dirs = [
         (time_value, time_dir)
@@ -723,15 +968,23 @@ def _analyze_reconstructed(
         )
 
     poly_mesh_dir = main_dir / "constant" / "polyMesh"
-    mesh_info = _read_or_build_volumes(
-        poly_mesh_dir,
-        settings,
-        field_info.value_count,
-        cache_session,
-        fingerprints,
-    )
+    try:
+        mesh_info = _read_or_build_volumes(
+            poly_mesh_dir,
+            settings,
+            layout_profile.expected_total_cells,
+            cache_session,
+            fingerprints,
+        )
+    except Exception as exc:
+        raise OpenFoamParseError(
+            "Batch layout mismatch: reconstructed mesh for "
+            f"{main_dir} does not match the expected "
+            f"{layout_profile.expected_total_cells} cells: {exc}"
+        ) from exc
     input_paths = _mesh_input_paths(poly_mesh_dir, mesh_info)
     rows: list[TimeResult] = []
+    skipped_times: list[SkippedTime] = []
     for time_value, time_dir in time_dirs:
         if stop_requested():
             break
@@ -742,6 +995,21 @@ def _analyze_reconstructed(
             fingerprints,
         )
         input_paths.append(density_path)
+        if not _density_file_is_compatible(
+            density_path,
+            densities,
+            layout_profile.expected_total_cells,
+        ):
+            skipped_times.append(
+                SkippedTime(
+                    time=time_value,
+                    source_path=str(density_path),
+                    density_count=len(densities),
+                    expected_cell_count=layout_profile.expected_total_cells,
+                    reason="density count does not match reconstructed mesh",
+                )
+            )
+            continue
         rows.append(
             _volume_for_time(
                 time_value,
@@ -750,22 +1018,49 @@ def _analyze_reconstructed(
                 settings,
             )
         )
-    log(f"{main_dir.parent.name}: 再構成済み時刻フィールド={len(rows)}")
-    return rows, mesh_info, field_info.field_class or "", input_paths
+    case_name = main_dir.parent.name if main_dir.name == "main" else main_dir.name
+    log(
+        f"{case_name}: 再構成済み時刻フィールド={len(rows)}, "
+        f"除外={len(skipped_times)}"
+    )
+    return (
+        rows,
+        mesh_info,
+        field_info.field_class or "",
+        input_paths,
+        skipped_times,
+    )
 
 
 def _analyze_processors(
     main_dir: Path,
     settings: AnalysisSettings,
+    layout_profile: AnalysisLayoutProfile,
     stop_requested,
     log,
     cache_session: AnalysisCacheSession | None = None,
     fingerprints: dict[Path, FileFingerprint] | None = None,
-) -> tuple[list[TimeResult], str, str, list[Path], list[MeshVolumeInfo]]:
+) -> tuple[
+    list[TimeResult],
+    str,
+    str,
+    list[Path],
+    list[MeshVolumeInfo],
+    list[SkippedTime],
+]:
     fingerprints = fingerprints or {}
     processors = sorted(path for path in main_dir.glob("processor*") if path.is_dir())
     if not processors:
-        return [], "", "", [], []
+        raise OpenFoamParseError(
+            "Batch layout mismatch: processor directories were expected "
+            f"from {layout_profile.source_case}"
+        )
+    if len(processors) != layout_profile.processor_count:
+        raise OpenFoamParseError(
+            "Batch layout mismatch: "
+            f"expected {layout_profile.processor_count} processor directories, "
+            f"found {len(processors)} in {main_dir}"
+        )
 
     proc_data = []
     input_paths: list[Path] = []
@@ -787,21 +1082,39 @@ def _analyze_processors(
                 f"{first_field}: {field_info.field_class}; expected volScalarField"
             )
         field_class = field_info.field_class or ""
-        mesh_info = _read_or_build_volumes(
-            processor / "constant" / "polyMesh",
+        processor_mesh_dir = processor / "constant" / "polyMesh"
+        expected_processor_cells = _layout_cell_count(
+            processor_mesh_dir,
             settings,
-            field_info.value_count,
+            [
+                time_dir / settings.density_field
+                for time_dir in time_dirs.values()
+            ],
+        )
+        mesh_info = _read_or_build_volumes(
+            processor_mesh_dir,
+            settings,
+            expected_processor_cells,
             cache_session,
             fingerprints,
         )
         proc_data.append((processor, time_dirs, mesh_info))
         mesh_infos.append(mesh_info)
         input_paths.extend(
-            _mesh_input_paths(processor / "constant" / "polyMesh", mesh_info)
+            _mesh_input_paths(processor_mesh_dir, mesh_info)
         )
         all_times.update(time_dirs.keys())
 
+    total_mesh_cells = sum(len(info.volumes) for info in mesh_infos)
+    if total_mesh_cells != layout_profile.expected_total_cells:
+        raise OpenFoamParseError(
+            "Batch layout mismatch: "
+            f"expected {layout_profile.expected_total_cells} total processor cells, "
+            f"found {total_mesh_cells} in {main_dir}"
+        )
+
     rows: list[TimeResult] = []
+    skipped_times: list[SkippedTime] = []
     for time_value in sorted(all_times):
         if stop_requested():
             break
@@ -812,9 +1125,14 @@ def _analyze_processors(
         point_bounds = _combined_point_bounds(
             mesh_info.point_bounds for _, _, mesh_info in proc_data
         )
-        for _, time_dirs, mesh_info in proc_data:
+        loaded_parts: list[tuple[list[float], MeshVolumeInfo]] = []
+        density_paths: list[Path] = []
+        actual_count = 0
+        mismatch_reasons: list[str] = []
+        for processor, time_dirs, mesh_info in proc_data:
             time_dir = time_dirs.get(time_value)
             if not time_dir:
+                mismatch_reasons.append(f"{processor.name}: field missing")
                 continue
             density_path = time_dir / settings.density_field
             densities = _read_density_values(
@@ -823,6 +1141,38 @@ def _analyze_processors(
                 fingerprints,
             )
             input_paths.append(density_path)
+            density_paths.append(density_path)
+            field_info_for_time = read_field_info(density_path)
+            actual_count += (
+                len(mesh_info.volumes)
+                if field_info_for_time.value_count is None
+                else len(densities)
+            )
+            if not _density_file_is_compatible(
+                density_path,
+                densities,
+                len(mesh_info.volumes),
+            ):
+                mismatch_reasons.append(
+                    f"{processor.name}: density={len(densities)}, "
+                    f"mesh={len(mesh_info.volumes)}"
+                )
+                continue
+            loaded_parts.append((densities, mesh_info))
+
+        if mismatch_reasons or len(loaded_parts) != len(proc_data):
+            skipped_times.append(
+                SkippedTime(
+                    time=time_value,
+                    source_path="; ".join(str(path) for path in density_paths),
+                    density_count=actual_count,
+                    expected_cell_count=layout_profile.expected_total_cells,
+                    reason="; ".join(mismatch_reasons),
+                )
+            )
+            continue
+
+        for densities, mesh_info in loaded_parts:
             stats = _selected_volume_stats(
                 densities,
                 mesh_info.volumes,
@@ -857,13 +1207,18 @@ def _analyze_processors(
             )
         )
 
-    log(f"{main_dir.parent.name}: processor分割時刻フィールド={len(rows)}")
+    case_name = main_dir.parent.name if main_dir.name == "main" else main_dir.name
+    log(
+        f"{case_name}: processor分割時刻フィールド={len(rows)}, "
+        f"除外={len(skipped_times)}"
+    )
     return (
         rows,
         f"{len(proc_data)} processor meshes",
         field_class,
         input_paths,
         mesh_infos,
+        skipped_times,
     )
 
 
@@ -908,14 +1263,6 @@ def _read_or_build_volumes(
 
     try:
         mesh_info = read_mesh_volumes(poly_mesh_dir)
-        if expected_cells is not None and len(mesh_info.volumes) != expected_cells:
-            raise OpenFoamParseError(
-                f"{poly_mesh_dir}: mesh cells={len(mesh_info.volumes)}, field cells={expected_cells}"
-            )
-        if cache_session is not None and mesh_key is not None:
-            metadata, arrays = _mesh_cache_payload(mesh_info)
-            cache_session.store_mesh(mesh_key, metadata, arrays)
-        return mesh_info
     except Exception as mesh_error:
         fallback = settings.fallback_cell_volume()
         if fallback is None or expected_cells is None:
@@ -932,6 +1279,15 @@ def _read_or_build_volumes(
             max_volume=fallback,
             total_volume=fallback * expected_cells,
         )
+    if expected_cells is not None and len(mesh_info.volumes) != expected_cells:
+        raise OpenFoamParseError(
+            f"{poly_mesh_dir}: mesh cells={len(mesh_info.volumes)}, "
+            f"expected cells={expected_cells}"
+        )
+    if cache_session is not None and mesh_key is not None:
+        metadata, arrays = _mesh_cache_payload(mesh_info)
+        cache_session.store_mesh(mesh_key, metadata, arrays)
+    return mesh_info
 
 
 def _volume_mode_label(mesh_info: MeshVolumeInfo) -> str:
@@ -1098,6 +1454,30 @@ def _expanded_densities(densities: list[float], cell_count: int) -> list[float]:
             f"Density count {len(densities)} does not match cell volume count {cell_count}"
         )
     return densities
+
+
+def _density_file_is_compatible(
+    density_path: Path,
+    densities: list[float],
+    expected_cells: int,
+) -> bool:
+    info = read_field_info(density_path)
+    if info.value_count is None:
+        return len(densities) == 1
+    return len(densities) == expected_cells
+
+
+def _skipped_time_warning(skipped_times: list[SkippedTime]) -> str:
+    preview = ", ".join(
+        f"{item.time:g} ({item.density_count}/{item.expected_cell_count})"
+        for item in skipped_times[:10]
+    )
+    if len(skipped_times) > 10:
+        preview += f", ... +{len(skipped_times) - 10}"
+    return (
+        f"Skipped {len(skipped_times)} time field(s) with incomplete or "
+        f"mismatched cell data: {preview}"
+    )
 
 
 def density_contour_points(
@@ -1314,13 +1694,25 @@ def find_evaporation_time(
     rows: list[TimeResult],
     zero_tolerance: float,
     consecutive_zero_count: int,
+    skipped_times: Iterable[float] = (),
 ) -> float | None:
     if consecutive_zero_count <= 0:
         consecutive_zero_count = 1
 
     zero_run_start: float | None = None
     zero_run_count = 0
+    skipped = sorted(float(value) for value in skipped_times)
+    skipped_index = 0
+    previous_time: float | None = None
     for row in rows:
+        gap_contains_skipped_time = False
+        while skipped_index < len(skipped) and skipped[skipped_index] < row.time:
+            if previous_time is not None and skipped[skipped_index] > previous_time:
+                gap_contains_skipped_time = True
+            skipped_index += 1
+        if gap_contains_skipped_time:
+            zero_run_start = None
+            zero_run_count = 0
         if row.volume <= zero_tolerance:
             if zero_run_count == 0:
                 zero_run_start = row.time
@@ -1330,6 +1722,7 @@ def find_evaporation_time(
         else:
             zero_run_start = None
             zero_run_count = 0
+        previous_time = row.time
     return None
 
 
@@ -1357,6 +1750,10 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                 "departure_raw_event_count",
                 "departure_confirmed_event_count",
                 "departure_excluded_height_count",
+                "warning_count",
+                "skipped_time_count",
+                "skipped_times",
+                "warnings",
                 "error",
             ]
         )
@@ -1398,6 +1795,10 @@ def write_summary_csv(path: Path, results: list[CaseResult]) -> None:
                         if result.departure_result is None
                         else result.departure_result.excluded_normalized_height_count
                     ),
+                    len(result.warnings),
+                    len(result.skipped_times),
+                    ";".join(f"{item.time:.17g}" for item in result.skipped_times),
+                    " | ".join(result.warnings),
                     result.error,
                 ]
             )
