@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from PIL import Image
 
@@ -154,15 +154,23 @@ class GuiTheorySettingsTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_local_worker_reuses_one_batch_layout_profile(self) -> None:
+    def test_local_worker_detects_each_case_layout_independently(self) -> None:
         cases = [Path("case_a"), Path("case_b")]
         settings = AnalysisSettings()
-        profile = AnalysisLayoutProfile(
-            mode="reconstructed",
-            expected_total_cells=4352,
-            processor_count=0,
-            source_case="case_a",
-        )
+        profiles = [
+            AnalysisLayoutProfile(
+                mode="reconstructed",
+                expected_total_cells=3825,
+                processor_count=0,
+                source_case="case_a",
+            ),
+            AnalysisLayoutProfile(
+                mode="reconstructed",
+                expected_total_cells=4352,
+                processor_count=0,
+                source_case="case_b",
+            ),
+        ]
         received_profiles = []
 
         def fake_analyze_case(case, run_settings, **kwargs):
@@ -171,8 +179,8 @@ class GuiTheorySettingsTests(unittest.TestCase):
 
         with (
             patch(
-                "mdfoam_analyzer.gui.detect_batch_layout",
-                return_value=profile,
+                "mdfoam_analyzer.gui.detect_analysis_layout",
+                side_effect=profiles,
             ) as detect,
             patch(
                 "mdfoam_analyzer.gui.analyze_case",
@@ -182,8 +190,11 @@ class GuiTheorySettingsTests(unittest.TestCase):
             worker = AnalyzerWorker(cases, settings)
             worker.run()
 
-        detect.assert_called_once_with(cases, settings)
-        self.assertEqual(received_profiles, [profile, profile])
+        self.assertEqual(
+            detect.call_args_list,
+            [call(cases[0], settings), call(cases[1], settings)],
+        )
+        self.assertEqual(received_profiles, profiles)
 
     def test_departure_distribution_plot_switches_between_count_and_rate(self) -> None:
         window = MainWindow()
@@ -637,6 +648,82 @@ class GuiTheorySettingsTests(unittest.TestCase):
                 dialog.legend_check.setChecked(False)
                 self.app.processEvents()
                 self.assertIsNone(dialog.preview_plot.figure.axes[0].get_legend())
+            finally:
+                dialog.close()
+        finally:
+            plot.close()
+
+    def test_png_preview_settings_fit_panel_explain_controls_and_reset(self) -> None:
+        plot = PlotWidget()
+        try:
+            plot.plot_xy("original", "time", "volume", [0.0, 1.0], [1.0, 2.0])
+            dialog = GraphPngPreviewDialog(plot, ".")
+            try:
+                dialog.resize(900, 650)
+                dialog.show()
+                self.app.processEvents()
+
+                settings_widget = dialog.settings_scroll.widget()
+                viewport = dialog.settings_scroll.viewport()
+                self.assertEqual(
+                    dialog.settings_scroll.horizontalScrollBar().maximum(),
+                    0,
+                )
+                self.assertLessEqual(
+                    settings_widget.minimumSizeHint().width(),
+                    viewport.width(),
+                )
+
+                explained_controls = (
+                    dialog.title_edit,
+                    dialog.x_label_edit,
+                    dialog.y_label_edit,
+                    dialog.color_button,
+                    dialog.point_size_spin,
+                    dialog.alpha_spin,
+                    dialog.font_size_spin,
+                    dialog.marker_combo,
+                    dialog.aspect_combo,
+                    dialog.title_check,
+                    dialog.axis_label_check,
+                    dialog.tick_label_check,
+                    dialog.grid_check,
+                    dialog.axis_auto_check,
+                    dialog.x_min_spin,
+                    dialog.x_max_spin,
+                    dialog.y_min_spin,
+                    dialog.y_max_spin,
+                    dialog.x_log_check,
+                    dialog.y_log_check,
+                    dialog.x_tick_rotation_spin,
+                    dialog.width_spin,
+                    dialog.height_spin,
+                    dialog.quality_combo,
+                    dialog.transparent_check,
+                )
+                self.assertTrue(all(control.toolTip() for control in explained_controls))
+                self.assertIn("#", dialog.color_button.text())
+                self.assertTrue(dialog.point_size_spin.isEnabled())
+                self.assertFalse(dialog.line_width_override_check.isEnabled())
+                self.assertFalse(dialog.legend_check.isEnabled())
+
+                original_size = dialog.preview_plot.settings.point_size
+                dialog.point_size_spin.setValue(original_size + 10.0)
+                dialog.title_edit.setText("changed")
+                self.assertNotEqual(
+                    dialog.preview_plot.settings.point_size,
+                    original_size,
+                )
+                dialog.reset_settings()
+                self.assertEqual(
+                    dialog.preview_plot.settings.point_size,
+                    original_size,
+                )
+                self.assertEqual(dialog.title_edit.text(), "original")
+                self.assertEqual(
+                    dialog.preview_plot.figure.axes[0].get_title(),
+                    "original",
+                )
             finally:
                 dialog.close()
         finally:

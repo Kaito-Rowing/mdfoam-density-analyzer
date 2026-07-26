@@ -151,12 +151,21 @@ def is_openfoam_data_dir(path: Path) -> bool:
 
 
 def resolve_case_data_dir(case_dir: Path) -> Path | None:
-    """Resolve either ``case/main`` or a directly selected OpenFOAM case root."""
+    """Resolve the OpenFOAM data directory contained by *case_dir*.
+
+    Besides the conventional ``case/main`` layout, accept a directly selected
+    OpenFOAM root and a case folder whose same-named child is the OpenFOAM root
+    (for example ``mainv12/mainv12``).
+    """
     main_dir = case_dir / "main"
     if main_dir.is_dir():
         return main_dir
     if is_openfoam_data_dir(case_dir):
         return case_dir
+
+    named_data_dir = case_dir / case_dir.name
+    if is_openfoam_data_dir(named_data_dir):
+        return named_data_dir
     return None
 
 

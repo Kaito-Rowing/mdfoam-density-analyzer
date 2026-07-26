@@ -63,7 +63,7 @@ from .analysis import (
     CaseResult,
     TimeResult,
     analyze_case,
-    detect_batch_layout,
+    detect_analysis_layout,
     discover_cases,
     discover_fields_for_cases,
     write_summary_csv,
@@ -944,6 +944,14 @@ TRANSLATIONS["en"].update(
         "グリッド線幅": "Grid line width",
         "グリッド線種": "Grid line style",
         "x目盛回転 [deg]": "x tick rotation [deg]",
+        "変更は右のプレビューへすぐ反映されます。各項目にカーソルを合わせると説明を表示します。": "Changes appear immediately in the preview. Hover over a control for details.",
+        "対象": "Target",
+        "点と基本表示": "Points and basic display",
+        "点の不透明度": "Point opacity",
+        "縦横比": "Aspect ratio",
+        "表示する要素": "Visible elements",
+        "軸範囲を自動設定": "Automatic axis range",
+        "設定をリセット": "Reset settings",
     }
 )
 TRANSLATIONS["zh"].update(
@@ -979,6 +987,14 @@ TRANSLATIONS["zh"].update(
         "グリッド線幅": "网格线宽",
         "グリッド線種": "网格线型",
         "x目盛回転 [deg]": "x 刻度旋转 [deg]",
+        "変更は右のプレビューへすぐ反映されます。各項目にカーソルを合わせると説明を表示します。": "更改会立即显示在右侧预览中。将鼠标悬停在控件上可查看说明。",
+        "対象": "目标",
+        "点と基本表示": "点和基本显示",
+        "点の不透明度": "点不透明度",
+        "縦横比": "纵横比",
+        "表示する要素": "显示元素",
+        "軸範囲を自動設定": "自动轴范围",
+        "設定をリセット": "重置设置",
     }
 )
 TRANSLATIONS["es"].update(
@@ -1014,6 +1030,14 @@ TRANSLATIONS["es"].update(
         "グリッド線幅": "Ancho de cuadrícula",
         "グリッド線種": "Estilo de cuadrícula",
         "x目盛回転 [deg]": "Rotación de marcas x [deg]",
+        "変更は右のプレビューへすぐ反映されます。各項目にカーソルを合わせると説明を表示します。": "Los cambios aparecen de inmediato en la vista previa. Pase el cursor sobre un control para ver su descripción.",
+        "対象": "Objetivo",
+        "点と基本表示": "Puntos y visualización básica",
+        "点の不透明度": "Opacidad de puntos",
+        "縦横比": "Relación de aspecto",
+        "表示する要素": "Elementos visibles",
+        "軸範囲を自動設定": "Rango de ejes automático",
+        "設定をリセット": "Restablecer ajustes",
     }
 )
 TRANSLATIONS["hi"].update(
@@ -1049,6 +1073,14 @@ TRANSLATIONS["hi"].update(
         "グリッド線幅": "ग्रिड रेखा चौड़ाई",
         "グリッド線種": "ग्रिड रेखा शैली",
         "x目盛回転 [deg]": "x टिक घुमाव [deg]",
+        "変更は右のプレビューへすぐ反映されます。各項目にカーソルを合わせると説明を表示します。": "बदलाव तुरंत दाईं ओर पूर्वावलोकन में दिखते हैं। विवरण के लिए नियंत्रण पर कर्सर रखें।",
+        "対象": "लक्ष्य",
+        "点と基本表示": "बिंदु और मूल प्रदर्शन",
+        "点の不透明度": "बिंदु अपारदर्शिता",
+        "縦横比": "आस्पेक्ट अनुपात",
+        "表示する要素": "दिखने वाले तत्व",
+        "軸範囲を自動設定": "स्वचालित अक्ष सीमा",
+        "設定をリセット": "सेटिंग रीसेट करें",
     }
 )
 
@@ -1259,50 +1291,46 @@ class AnalyzerWorker(QObject):
 
             total = len(self.cases)
             cache_session = AnalysisCacheSession(log=self.log.emit)
-            try:
-                layout_profile = detect_batch_layout(
-                    [Path(case) for case in self.cases],
-                    self.settings,
-                )
-            except Exception as exc:
-                message = f"バッチのセル構成を判定できませんでした: {exc}"
-                self.log.emit(message)
-                for index, case in enumerate(self.cases, start=1):
-                    case_path = Path(case)
-                    self.case_finished.emit(
-                        CaseResult(
-                            case_name=case_path.name,
-                            case_dir=case_path,
-                            status="error",
-                            error=message,
-                            contact_average_percent=(
-                                self.settings.contact_average_percent
-                            ),
-                            source_case_path=str(case_path),
-                        )
-                    )
-                    self.progress.emit(index, total)
-                return
-            self.log.emit(
-                "バッチセル構成: "
-                f"{layout_profile.mode}, "
-                f"総セル数={layout_profile.expected_total_cells}, "
-                f"processor数={layout_profile.processor_count}, "
-                f"判定元={Path(layout_profile.source_case).name}"
-            )
             for index, case in enumerate(self.cases, start=1):
                 if self._stop_requested:
                     self.log.emit("残りのケースを解析せずに停止しました。")
                     break
-                self.log.emit(f"{case.name} を解析中...")
-                result = analyze_case(
-                    case,
-                    self.settings,
-                    stop_requested=lambda: self._stop_requested,
-                    log=self.log.emit,
-                    cache_session=cache_session,
-                    layout_profile=layout_profile,
-                )
+                case_path = Path(case)
+                self.log.emit(f"{case_path.name} を解析中...")
+                try:
+                    layout_profile = detect_analysis_layout(
+                        case_path,
+                        self.settings,
+                    )
+                    self.log.emit(
+                        f"{case_path.name} のセル構成: "
+                        f"{layout_profile.mode}, "
+                        f"総セル数={layout_profile.expected_total_cells}, "
+                        f"processor数={layout_profile.processor_count}"
+                    )
+                    result = analyze_case(
+                        case_path,
+                        self.settings,
+                        stop_requested=lambda: self._stop_requested,
+                        log=self.log.emit,
+                        cache_session=cache_session,
+                        layout_profile=layout_profile,
+                    )
+                except Exception as exc:
+                    message = (
+                        f"{case_path.name} のセル構成を判定できませんでした: {exc}"
+                    )
+                    self.log.emit(message)
+                    result = CaseResult(
+                        case_name=case_path.name,
+                        case_dir=case_path,
+                        status="error",
+                        error=message,
+                        contact_average_percent=(
+                            self.settings.contact_average_percent
+                        ),
+                        source_case_path=str(case_path),
+                    )
                 self.case_finished.emit(result)
                 self.progress.emit(index, total)
         except Exception:
@@ -1721,6 +1749,9 @@ class GraphPngPreviewDialog(QDialog):
             else:
                 preview = CombinedPlotWidget(plots, light_theme=True)
             self.preview_widgets.append(preview)
+        self._initial_preview_settings = [
+            GraphSettings(**vars(widget.settings)) for widget in self.preview_widgets
+        ]
         self.preview_plot: PlotWidget | CombinedPlotWidget = self.preview_widgets[0]
 
         layout = QVBoxLayout(self)
@@ -1729,13 +1760,23 @@ class GraphPngPreviewDialog(QDialog):
 
         settings_group = QGroupBox(_tr("グラフ表示設定", self.language))
         settings_layout = QVBoxLayout(settings_group)
-        settings_scroll = QScrollArea()
-        settings_scroll.setWidgetResizable(True)
-        settings_scroll.setFrameShape(QFrame.NoFrame)
-        settings_scroll.setMinimumWidth(390)
-        settings_scroll.setMaximumWidth(470)
-        settings_scroll.setWidget(settings_group)
-        body.addWidget(settings_scroll, 0)
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setFrameShape(QFrame.NoFrame)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.settings_scroll.setMinimumWidth(360)
+        self.settings_scroll.setMaximumWidth(520)
+        self.settings_scroll.setWidget(settings_group)
+        body.addWidget(self.settings_scroll, 0)
+        help_hint = QLabel(
+            _tr(
+                "変更は右のプレビューへすぐ反映されます。各項目にカーソルを合わせると説明を表示します。",
+                self.language,
+            )
+        )
+        help_hint.setWordWrap(True)
+        help_hint.setProperty("role", "muted")
+        settings_layout.addWidget(help_hint)
         self.preview_stack = QStackedWidget()
         self.preview_scroll_areas: list[QScrollArea] = []
         for widget in self.preview_widgets:
@@ -1749,15 +1790,15 @@ class GraphPngPreviewDialog(QDialog):
 
         self.source_combo: QComboBox | None = None
         if len(self.source_options) > 1:
-            source_row = QHBoxLayout()
             self.source_combo = QComboBox()
             self.source_combo.addItems([label for label, _plots, _filename in self.source_options])
-            source_row.addWidget(QLabel(_tr("保存するグラフ", self.language)))
-            source_row.addWidget(self.source_combo)
-            settings_layout.addLayout(source_row)
+            source_group = QGroupBox(_tr("保存するグラフ", self.language))
+            source_layout = self._form_layout(source_group)
+            source_layout.addRow(_tr("対象", self.language), self.source_combo)
+            settings_layout.addWidget(source_group)
 
         content_group = QGroupBox(_tr("グラフ内容", self.language))
-        content_layout = QFormLayout(content_group)
+        content_layout = self._form_layout(content_group)
         self.title_edit = QLineEdit()
         self.title_edit.setClearButtonEnabled(True)
         self.x_label_edit = QLineEdit()
@@ -1769,29 +1810,26 @@ class GraphPngPreviewDialog(QDialog):
         content_layout.addRow(_tr("y軸ラベル", self.language), self.y_label_edit)
         settings_layout.addWidget(content_group)
 
-        color_row = QHBoxLayout()
+        appearance_group = QGroupBox(_tr("点と基本表示", self.language))
+        appearance_layout = self._form_layout(appearance_group)
         self.color_button = QPushButton(_tr("色", self.language))
         self.point_size_spin = self._double_spin(1.0, 200.0, 1, self.preview_plot.settings.point_size)
+        self.point_size_spin.setSuffix(" pt²")
         self.alpha_spin = self._double_spin(0.05, 1.0, 2, self.preview_plot.settings.point_alpha, 0.05)
-        color_row.addWidget(QLabel(_tr("点色", self.language)))
-        color_row.addWidget(self.color_button)
-        color_row.addWidget(QLabel(_tr("点サイズ", self.language)))
-        color_row.addWidget(self.point_size_spin)
-        color_row.addWidget(QLabel(_tr("透明度", self.language)))
-        color_row.addWidget(self.alpha_spin)
-        settings_layout.addLayout(color_row)
-
-        style_row = QHBoxLayout()
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(6, 40)
         self.font_size_spin.setValue(self.preview_plot.settings.font_size)
         self.font_size_spin.setKeyboardTracking(True)
+        self.font_size_spin.setSuffix(" pt")
         self.title_font_size_spin = QSpinBox()
         self.title_font_size_spin.setRange(6, 72)
+        self.title_font_size_spin.setSuffix(" pt")
         self.axis_label_font_size_spin = QSpinBox()
         self.axis_label_font_size_spin.setRange(6, 72)
+        self.axis_label_font_size_spin.setSuffix(" pt")
         self.legend_font_size_spin = QSpinBox()
         self.legend_font_size_spin.setRange(6, 72)
+        self.legend_font_size_spin.setSuffix(" pt")
         self.marker_combo = QComboBox()
         self.marker_combo.addItems(["o", "s", "^", "D", "x", "+", "."])
         self.marker_combo.setCurrentText(self.preview_plot.settings.marker)
@@ -1800,42 +1838,41 @@ class GraphPngPreviewDialog(QDialog):
         _combo_set_items(self.aspect_combo, [("自動", "auto"), ("等倍", "equal")], self.language)
         index = self.aspect_combo.findData(self.preview_plot.settings.aspect)
         self.aspect_combo.setCurrentIndex(index if index >= 0 else 0)
-        style_row.addWidget(QLabel(_tr("目盛文字", self.language)))
-        style_row.addWidget(self.font_size_spin)
-        style_row.addWidget(QLabel(_tr("マーカー", self.language)))
-        style_row.addWidget(self.marker_combo)
-        style_row.addWidget(self.marker_override_check)
-        style_row.addWidget(QLabel(_tr("縦横", self.language)))
-        style_row.addWidget(self.aspect_combo)
-        settings_layout.addLayout(style_row)
+        appearance_layout.addRow(_tr("点色", self.language), self.color_button)
+        appearance_layout.addRow(_tr("点サイズ", self.language), self.point_size_spin)
+        appearance_layout.addRow(_tr("点の不透明度", self.language), self.alpha_spin)
+        appearance_layout.addRow(_tr("目盛文字", self.language), self.font_size_spin)
+        appearance_layout.addRow(_tr("マーカー", self.language), self.marker_combo)
+        appearance_layout.addRow("", self.marker_override_check)
+        appearance_layout.addRow(_tr("縦横比", self.language), self.aspect_combo)
+        settings_layout.addWidget(appearance_group)
 
         font_group = QGroupBox(_tr("文字サイズ", self.language))
-        font_layout = QFormLayout(font_group)
+        font_layout = self._form_layout(font_group)
         font_layout.addRow(_tr("タイトル文字", self.language), self.title_font_size_spin)
         font_layout.addRow(_tr("軸ラベル文字", self.language), self.axis_label_font_size_spin)
         font_layout.addRow(_tr("凡例文字", self.language), self.legend_font_size_spin)
         settings_layout.addWidget(font_group)
 
-        visibility_row = QHBoxLayout()
+        visibility_group = QGroupBox(_tr("表示する要素", self.language))
+        visibility_layout = QGridLayout(visibility_group)
         self.title_check = QCheckBox(_tr("タイトル", self.language))
         self.axis_label_check = QCheckBox(_tr("軸ラベル", self.language))
         self.tick_label_check = QCheckBox(_tr("目盛", self.language))
         self.legend_check = QCheckBox(_tr("凡例", self.language))
         self.grid_check = QCheckBox(_tr("グリッド", self.language))
-        visibility_row.addWidget(self.title_check)
-        visibility_row.addWidget(self.axis_label_check)
-        visibility_row.addWidget(self.tick_label_check)
-        visibility_row.addWidget(self.legend_check)
-        visibility_row.addWidget(self.grid_check)
-        settings_layout.addLayout(visibility_row)
+        visibility_layout.addWidget(self.title_check, 0, 0)
+        visibility_layout.addWidget(self.axis_label_check, 0, 1)
+        visibility_layout.addWidget(self.tick_label_check, 1, 0)
+        visibility_layout.addWidget(self.legend_check, 1, 1)
+        visibility_layout.addWidget(self.grid_check, 2, 0)
+        settings_layout.addWidget(visibility_group)
 
         line_group = QGroupBox(_tr("線と凡例", self.language))
-        line_layout = QFormLayout(line_group)
+        line_layout = self._form_layout(line_group)
         self.line_width_override_check = QCheckBox(_tr("線幅を統一", self.language))
         self.line_width_spin = self._double_spin(0.1, 20.0, 1, 1.5, 0.1)
-        line_width_row = QHBoxLayout()
-        line_width_row.addWidget(self.line_width_override_check)
-        line_width_row.addWidget(self.line_width_spin)
+        self.line_width_spin.setSuffix(" pt")
         self.line_style_combo = QComboBox()
         _combo_set_items(
             self.line_style_combo,
@@ -1860,15 +1897,17 @@ class GraphPngPreviewDialog(QDialog):
             ],
             self.language,
         )
-        line_layout.addRow(_tr("線幅", self.language), line_width_row)
+        line_layout.addRow("", self.line_width_override_check)
+        line_layout.addRow(_tr("線幅", self.language), self.line_width_spin)
         line_layout.addRow(_tr("線種", self.language), self.line_style_combo)
         line_layout.addRow(_tr("凡例位置", self.language), self.legend_location_combo)
         settings_layout.addWidget(line_group)
 
         grid_group = QGroupBox(_tr("グリッド設定", self.language))
-        grid_layout = QFormLayout(grid_group)
+        grid_layout = self._form_layout(grid_group)
         self.grid_alpha_spin = self._double_spin(0.0, 1.0, 2, 0.65, 0.05)
         self.grid_line_width_spin = self._double_spin(0.1, 5.0, 1, 0.8, 0.1)
+        self.grid_line_width_spin.setSuffix(" pt")
         self.grid_line_style_combo = QComboBox()
         _combo_set_items(
             self.grid_line_style_combo,
@@ -1881,8 +1920,8 @@ class GraphPngPreviewDialog(QDialog):
         settings_layout.addWidget(grid_group)
 
         axis_group = QGroupBox(_tr("軸", self.language))
-        axis_layout = QFormLayout(axis_group)
-        self.axis_auto_check = QCheckBox(_tr("自動", self.language))
+        axis_layout = self._form_layout(axis_group)
+        self.axis_auto_check = QCheckBox(_tr("軸範囲を自動設定", self.language))
         self.x_min_spin = self._signed_spin(self.preview_plot.settings.x_min)
         self.x_max_spin = self._signed_spin(self.preview_plot.settings.x_max)
         self.y_min_spin = self._signed_spin(self.preview_plot.settings.y_min)
@@ -1890,6 +1929,7 @@ class GraphPngPreviewDialog(QDialog):
         self.x_log_check = QCheckBox(_tr("x対数", self.language))
         self.y_log_check = QCheckBox(_tr("y対数", self.language))
         self.x_tick_rotation_spin = self._double_spin(-180.0, 180.0, 0, 0.0, 5.0)
+        self.x_tick_rotation_spin.setSuffix("°")
         axis_layout.addRow("", self.axis_auto_check)
         axis_layout.addRow(_tr("x最小", self.language), self.x_min_spin)
         axis_layout.addRow(_tr("x最大", self.language), self.x_max_spin)
@@ -1901,7 +1941,7 @@ class GraphPngPreviewDialog(QDialog):
         settings_layout.addWidget(axis_group)
 
         output_group = QGroupBox(_tr("PNG", self.language))
-        output_layout = QFormLayout(output_group)
+        output_layout = self._form_layout(output_group)
         self.width_spin = self._double_spin(1.0, 30.0, 1, self.preview_plot.settings.image_width)
         self.height_spin = self._double_spin(1.0, 30.0, 1, self.preview_plot.settings.image_height)
         self.quality_combo = QComboBox()
@@ -1917,16 +1957,215 @@ class GraphPngPreviewDialog(QDialog):
         settings_layout.addWidget(output_group)
         settings_layout.addStretch(1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Reset | QDialogButtonBox.Cancel
+        )
         buttons.button(QDialogButtonBox.Save).setText(_tr("保存", self.language))
+        buttons.button(QDialogButtonBox.Reset).setText(_tr("設定をリセット", self.language))
         buttons.button(QDialogButtonBox.Cancel).setText(_tr("キャンセル", self.language))
         layout.addWidget(buttons)
 
         self._load_controls_from_preview()
+        self._install_control_help(buttons)
         self._connect_controls()
         self._update_preview_canvas_size()
         buttons.button(QDialogButtonBox.Save).clicked.connect(self.save_png)
+        buttons.button(QDialogButtonBox.Reset).clicked.connect(self.reset_settings)
         buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def _form_layout(group: QGroupBox) -> QFormLayout:
+        form = QFormLayout(group)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        return form
+
+    def _install_control_help(self, buttons: QDialogButtonBox) -> None:
+        help_items: list[tuple[QWidget, str]] = [
+            (
+                self.title_edit,
+                "PNGに表示するグラフタイトルを書き換えます。空欄にするとタイトル文字を消せます。",
+            ),
+            (
+                self.x_label_edit,
+                "横軸の名称と単位を書き換えます。例: 時間 [s]",
+            ),
+            (
+                self.y_label_edit,
+                "縦軸の名称と単位を書き換えます。例: 体積 [m³]",
+            ),
+            (
+                self.color_button,
+                "単一系列の点・棒の色を選びます。複数系列固有の色は維持されます。",
+            ),
+            (
+                self.point_size_spin,
+                "散布点の面積をpt²で変更します。値を大きくすると点が大きくなります。",
+            ),
+            (
+                self.alpha_spin,
+                "点・線・棒の不透明度です。1.00で完全に不透明、0に近いほど薄くなります。",
+            ),
+            (
+                self.font_size_spin,
+                "x軸・y軸の目盛数値やカテゴリ名の文字サイズを変更します。",
+            ),
+            (
+                self.marker_combo,
+                "散布点の形を選びます。○、□、△、×などを切り替えられます。",
+            ),
+            (
+                self.marker_override_check,
+                "オンにすると、複数系列が持つ個別マーカーも上の形へ統一します。",
+            ),
+            (
+                self.aspect_combo,
+                "自動は領域に合わせて縦横を伸縮し、等倍はx方向とy方向を同じ縮尺で表示します。",
+            ),
+            (
+                self.title_font_size_spin,
+                "グラフタイトルだけの文字サイズを変更します。",
+            ),
+            (
+                self.axis_label_font_size_spin,
+                "x軸・y軸ラベルだけの文字サイズを変更します。",
+            ),
+            (
+                self.legend_font_size_spin,
+                "凡例内の系列名の文字サイズを変更します。",
+            ),
+            (
+                self.title_check,
+                "グラフタイトルをPNGに表示するか切り替えます。",
+            ),
+            (
+                self.axis_label_check,
+                "x軸・y軸ラベルをPNGに表示するか切り替えます。",
+            ),
+            (
+                self.tick_label_check,
+                "軸の目盛数値やカテゴリ名を表示するか切り替えます。",
+            ),
+            (
+                self.legend_check,
+                "複数系列の凡例を表示するか切り替えます。系列がないグラフには影響しません。",
+            ),
+            (
+                self.grid_check,
+                "プロット領域の補助グリッド線を表示するか切り替えます。",
+            ),
+            (
+                self.line_width_override_check,
+                "オンにすると、複数系列が持つ個別の線幅を指定値へ統一します。",
+            ),
+            (
+                self.line_width_spin,
+                "折れ線の太さを変更します。「線幅を統一」がオンのときに有効です。",
+            ),
+            (
+                self.line_style_combo,
+                "折れ線を元の線種・実線・破線・点線・一点鎖線から選びます。",
+            ),
+            (
+                self.legend_location_combo,
+                "凡例を置く位置を選びます。自動配置はデータとの重なりが少ない位置を探します。",
+            ),
+            (
+                self.grid_alpha_spin,
+                "グリッド線の不透明度です。0で透明、1で完全に不透明になります。",
+            ),
+            (
+                self.grid_line_width_spin,
+                "グリッド線の太さを変更します。",
+            ),
+            (
+                self.grid_line_style_combo,
+                "グリッド線を実線・破線・点線・一点鎖線から選びます。",
+            ),
+            (
+                self.axis_auto_check,
+                "オンではデータ全体が収まる軸範囲を使用します。オフにすると下の最小・最大値を編集できます。",
+            ),
+            (
+                self.x_min_spin,
+                "手動設定時のx軸下限です。x最大より小さい値を指定してください。",
+            ),
+            (
+                self.x_max_spin,
+                "手動設定時のx軸上限です。x最小より大きい値を指定してください。",
+            ),
+            (
+                self.y_min_spin,
+                "手動設定時のy軸下限です。y最大より小さい値を指定してください。",
+            ),
+            (
+                self.y_max_spin,
+                "手動設定時のy軸上限です。y最小より大きい値を指定してください。",
+            ),
+            (
+                self.x_log_check,
+                "x軸を対数目盛にします。表示範囲とデータには正の値が必要です。",
+            ),
+            (
+                self.y_log_check,
+                "y軸を対数目盛にします。表示範囲とデータには正の値が必要です。",
+            ),
+            (
+                self.x_tick_rotation_spin,
+                "x軸の目盛文字を指定角度だけ回転します。長いケース名の重なり回避に便利です。",
+            ),
+            (
+                self.width_spin,
+                "保存するPNGの横幅をインチ単位で指定します。プレビューの横幅も同じ比率で変わります。",
+            ),
+            (
+                self.height_spin,
+                "保存するPNGの高さをインチ単位で指定します。プレビューの高さも同じ比率で変わります。",
+            ),
+            (
+                self.quality_combo,
+                "保存時の解像度をdpiで選びます。高dpiほど精細ですが、ファイルサイズと保存時間が増えます。",
+            ),
+            (
+                self.transparent_check,
+                "オンにすると保存PNGの背景を透明にします。プレビューは視認性のため白背景で表示します。",
+            ),
+        ]
+        if self.source_combo is not None:
+            help_items.append(
+                (
+                    self.source_combo,
+                    "プレビューして保存するグラフを切り替えます。グラフごとの表示設定は個別に保持されます。",
+                )
+            )
+        for widget, description in help_items:
+            self._set_control_help(widget, description)
+            if isinstance(
+                widget,
+                (QComboBox, QDoubleSpinBox, QLineEdit, QSpinBox, QPushButton),
+            ):
+                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self._set_control_help(
+            buttons.button(QDialogButtonBox.Save),
+            "現在プレビューしている内容と表示設定でPNGを保存します。",
+        )
+        self._set_control_help(
+            buttons.button(QDialogButtonBox.Reset),
+            "現在選択中のグラフだけ、PNGプレビューを開いた時点の設定へ戻します。",
+        )
+        self._set_control_help(
+            buttons.button(QDialogButtonBox.Cancel),
+            "PNGを保存せずにプレビュー画面を閉じます。",
+        )
+
+    @staticmethod
+    def _set_control_help(widget: QWidget, description: str) -> None:
+        widget.setToolTip(description)
+        widget.setStatusTip(description)
+        widget.setWhatsThis(description)
+        widget.setAccessibleDescription(description)
 
     def _double_spin(
         self,
@@ -2145,6 +2384,18 @@ class GraphPngPreviewDialog(QDialog):
         self.preview_plot.redraw()
 
     @Slot()
+    def reset_settings(self) -> None:
+        index = self.source_combo.currentIndex() if self.source_combo is not None else 0
+        if index < 0 or index >= len(self._initial_preview_settings):
+            return
+        self.preview_plot.settings = GraphSettings(
+            **vars(self._initial_preview_settings[index])
+        )
+        self._load_controls_from_preview()
+        self._update_preview_canvas_size()
+        self.preview_plot.redraw()
+
+    @Slot()
     def apply_settings(self) -> None:
         settings = self.preview_plot.settings
         settings.point_size = self.point_size_spin.value()
@@ -2221,15 +2472,50 @@ class GraphPngPreviewDialog(QDialog):
         self.x_log_check.setEnabled(x_axis_available)
 
     def _update_line_controls_enabled(self) -> None:
-        self.line_width_spin.setEnabled(self.line_width_override_check.isChecked())
-        self.legend_location_combo.setEnabled(self.legend_check.isChecked())
-        self.legend_font_size_spin.setEnabled(self.legend_check.isChecked())
+        plots = (
+            self.preview_plot.source_plots
+            if isinstance(self.preview_plot, CombinedPlotWidget)
+            else [self.preview_plot]
+        )
+        has_scatter = False
+        has_line = False
+        has_legend = False
+        for plot in plots:
+            kind = plot._last_plot[0] if plot._last_plot is not None else "clear"
+            if kind == "xy":
+                has_scatter = True
+            elif kind == "series" and plot._last_series is not None:
+                series_list = plot._last_series[3]
+                has_scatter = has_scatter or any(
+                    item.style != "line" for item in series_list
+                )
+                has_line = has_line or any(
+                    item.style == "line" for item in series_list
+                )
+                has_legend = has_legend or any(item.label for item in series_list)
+
+        self.point_size_spin.setEnabled(has_scatter)
+        self.marker_combo.setEnabled(has_scatter)
+        self.marker_override_check.setEnabled(has_scatter and has_legend)
+        self.line_width_override_check.setEnabled(has_line)
+        self.line_width_spin.setEnabled(
+            has_line and self.line_width_override_check.isChecked()
+        )
+        self.line_style_combo.setEnabled(has_line)
+        self.legend_check.setEnabled(has_legend)
+        self.legend_location_combo.setEnabled(
+            has_legend and self.legend_check.isChecked()
+        )
+        self.legend_font_size_spin.setEnabled(
+            has_legend and self.legend_check.isChecked()
+        )
         grid_enabled = self.grid_check.isChecked()
         self.grid_alpha_spin.setEnabled(grid_enabled)
         self.grid_line_width_spin.setEnabled(grid_enabled)
         self.grid_line_style_combo.setEnabled(grid_enabled)
 
     def _set_color_button(self, color: str) -> None:
+        self.color_button.setText(color.upper())
         self.color_button.setStyleSheet(f"background-color: {color};")
 
     @Slot()

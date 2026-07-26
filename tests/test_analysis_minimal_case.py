@@ -79,6 +79,27 @@ def test_discovers_and_analyzes_direct_openfoam_case_root(tmp_path: Path) -> Non
     assert result.evaporation_time == 1.0
 
 
+def test_discovers_multiple_cases_with_differently_named_data_roots(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "batch"
+    conventional_case = parent / "main1"
+    named_case = parent / "mainv12"
+    shutil.copytree(CASE / "main", conventional_case / "main")
+    shutil.copytree(CASE / "main", named_case / "mainv12")
+
+    cases = discover_cases(parent)
+
+    assert cases == [conventional_case.resolve(), named_case.resolve()]
+    assert discover_fields_for_cases(cases) == ["rhoM_water"]
+    results = [
+        analyze_case(case, AnalysisSettings(consecutive_zero_count=3))
+        for case in cases
+    ]
+    assert [result.case_name for result in results] == ["main1", "mainv12"]
+    assert [result.status for result in results] == ["ok", "ok"]
+
+
 def test_discovers_fields_for_minimal_case() -> None:
     assert discover_fields_for_cases([CASE]) == ["rhoM_water"]
 
