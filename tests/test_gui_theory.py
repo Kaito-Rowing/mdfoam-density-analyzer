@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 
 from PIL import Image
 
@@ -19,7 +19,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 try:
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
 except ImportError as exc:
     raise unittest.SkipTest(f"PySide6 GUI runtime is unavailable: {exc}") from exc
 
@@ -33,6 +33,7 @@ from mdfoam_analyzer.gui import (
     AnalyzerWorker,
     PNG_PREVIEW_PIXELS_PER_INCH,
     CombinedPlotWidget,
+    GraphSettings,
     GraphPngPreviewDialog,
     MainWindow,
     PlotSeries,
@@ -728,6 +729,147 @@ class GuiTheorySettingsTests(unittest.TestCase):
                 dialog.close()
         finally:
             plot.close()
+
+    def test_all_case_png_preview_returns_settings_without_saving_one_file(
+        self,
+    ) -> None:
+        plot = PlotWidget()
+        try:
+            plot.plot_xy("case_a: volume", "time", "volume", [0.0, 1.0], [1.0, 2.0])
+            dialog = GraphPngPreviewDialog(
+                plot,
+                ".",
+                configure_only=True,
+            )
+            try:
+                dialog.point_size_spin.setValue(31.0)
+                dialog.quality_combo.setCurrentIndex(
+                    dialog.quality_combo.findData(600)
+                )
+                dialog.axis_auto_check.setChecked(True)
+                with patch.object(
+                    QFileDialog,
+                    "getSaveFileName",
+                    side_effect=AssertionError("single-file dialog must not open"),
+                ):
+                    dialog.save_png()
+
+                self.assertEqual(dialog.result(), QDialog.Accepted)
+                self.assertIsNone(dialog.saved_path)
+                self.assertIsNotNone(dialog.configured_settings)
+                self.assertEqual(dialog.configured_settings.point_size, 31.0)
+                self.assertEqual(dialog.configured_settings.dpi, 600)
+                self.assertTrue(dialog.configured_settings.axis_auto)
+                self.assertEqual(
+                    dialog.configured_settings.axis_mode,
+                    "per_plot_auto",
+                )
+                self.assertIsNone(dialog.configured_settings.title_text)
+            finally:
+                dialog.close()
+        finally:
+            plot.close()
+
+    def test_all_case_png_preview_accepts_combined_plot(self) -> None:
+        first = PlotWidget()
+        second = PlotWidget()
+        combined = None
+        try:
+            first.plot_xy("first", "x", "y", [0.0], [1.0])
+            second.plot_xy("second", "x", "y", [0.0], [2.0])
+            combined = CombinedPlotWidget([first, second])
+            dialog = GraphPngPreviewDialog(
+                combined,
+                ".",
+                configure_only=True,
+            )
+            try:
+                self.assertIsInstance(dialog.preview_plot, CombinedPlotWidget)
+                dialog.height_spin.setValue(12.0)
+                dialog.save_png()
+                self.assertEqual(dialog.result(), QDialog.Accepted)
+                self.assertEqual(dialog.configured_settings.image_height, 12.0)
+            finally:
+                dialog.close()
+        finally:
+            if combined is not None:
+                combined.close()
+            first.close()
+            second.close()
+
+    def test_all_case_png_export_applies_preview_settings_to_every_case(
+        self,
+    ) -> None:
+        window = MainWindow()
+        try:
+            for name, volume in (("case_a", 1.0), ("case_b", 2.0)):
+                result = CaseResult(
+                    case_name=name,
+                    case_dir=Path(),
+                    status="ok",
+                    rows=[TimeResult(0.0, volume, volume, 1, 1)],
+                )
+                window.results.append(result)
+                window.add_result_row(result)
+            window.table.setCurrentCell(0, 0)
+            window.tabs.setCurrentWidget(window.volume_plot)
+            window.update_selected_case_plots()
+
+            configured = GraphSettings(
+                point_color="#123456",
+                point_size=27.0,
+                image_width=9.0,
+                image_height=6.0,
+                dpi=600,
+                title_text=None,
+            )
+            settings_dialog = Mock()
+            settings_dialog.exec.return_value = QDialog.Accepted
+            settings_dialog.configured_settings = configured
+            saved: list[tuple[Path, GraphSettings, str]] = []
+
+            def capture_save(plot: PlotWidget, path: Path) -> None:
+                saved.append(
+                    (
+                        Path(path),
+                        GraphSettings(**vars(plot.settings)),
+                        plot._last_plot[1],
+                    )
+                )
+
+            with tempfile.TemporaryDirectory() as directory:
+                output_dir = Path(directory) / "all_png"
+                with (
+                    patch(
+                        "mdfoam_analyzer.gui.GraphPngPreviewDialog",
+                        return_value=settings_dialog,
+                    ) as preview_class,
+                    patch.object(
+                        window,
+                        "_choose_output_directory",
+                        return_value=output_dir,
+                    ),
+                    patch.object(
+                        PlotWidget,
+                        "save_png",
+                        autospec=True,
+                        side_effect=capture_save,
+                    ),
+                ):
+                    window.export_all_png()
+
+            self.assertEqual(len(saved), 2)
+            self.assertEqual(
+                [item[0].name for item in saved],
+                ["case_a_volume_time.png", "case_b_volume_time.png"],
+            )
+            self.assertEqual([item[2] for item in saved], ["case_a: 体積-時間", "case_b: 体積-時間"])
+            self.assertTrue(all(item[1].point_color == "#123456" for item in saved))
+            self.assertTrue(all(item[1].point_size == 27.0 for item in saved))
+            self.assertTrue(all(item[1].dpi == 600 for item in saved))
+            self.assertTrue(preview_class.call_args.kwargs["configure_only"])
+        finally:
+            window.close()
 
     def test_graph_axes_are_fixed_across_cases_and_manual_mode_overrides(self) -> None:
         window = MainWindow()

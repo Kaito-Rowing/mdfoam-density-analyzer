@@ -952,6 +952,9 @@ TRANSLATIONS["en"].update(
         "表示する要素": "Visible elements",
         "軸範囲を自動設定": "Automatic axis range",
         "設定をリセット": "Reset settings",
+        "全ケースPNG設定": "All-case PNG settings",
+        "全ケースへ適用": "Apply to all cases",
+        "この設定を全ケースのPNGへ適用します。タイトルを変更しなければ、各画像のケース名は維持されます。": "These settings will be applied to every case PNG. Leave the title unchanged to preserve each image's case name.",
     }
 )
 TRANSLATIONS["zh"].update(
@@ -995,6 +998,9 @@ TRANSLATIONS["zh"].update(
         "表示する要素": "显示元素",
         "軸範囲を自動設定": "自动轴范围",
         "設定をリセット": "重置设置",
+        "全ケースPNG設定": "所有案例 PNG 设置",
+        "全ケースへ適用": "应用于所有案例",
+        "この設定を全ケースのPNGへ適用します。タイトルを変更しなければ、各画像のケース名は維持されます。": "这些设置将应用于所有案例 PNG。不更改标题即可保留每张图片的案例名称。",
     }
 )
 TRANSLATIONS["es"].update(
@@ -1038,6 +1044,9 @@ TRANSLATIONS["es"].update(
         "表示する要素": "Elementos visibles",
         "軸範囲を自動設定": "Rango de ejes automático",
         "設定をリセット": "Restablecer ajustes",
+        "全ケースPNG設定": "Ajustes PNG para todos los casos",
+        "全ケースへ適用": "Aplicar a todos",
+        "この設定を全ケースのPNGへ適用します。タイトルを変更しなければ、各画像のケース名は維持されます。": "Estos ajustes se aplicarán a todos los PNG. Deje el título sin cambios para conservar el nombre de cada caso.",
     }
 )
 TRANSLATIONS["hi"].update(
@@ -1081,6 +1090,9 @@ TRANSLATIONS["hi"].update(
         "表示する要素": "दिखने वाले तत्व",
         "軸範囲を自動設定": "स्वचालित अक्ष सीमा",
         "設定をリセット": "सेटिंग रीसेट करें",
+        "全ケースPNG設定": "सभी केस PNG सेटिंग",
+        "全ケースへ適用": "सभी केस पर लागू करें",
+        "この設定を全ケースのPNGへ適用します。タイトルを変更しなければ、各画像のケース名は維持されます。": "ये सेटिंग सभी केस PNG पर लागू होंगी। हर चित्र का केस नाम बनाए रखने के लिए शीर्षक न बदलें।",
     }
 )
 
@@ -1719,22 +1731,43 @@ class CombinedPlotWidget(QWidget):
 class GraphPngPreviewDialog(QDialog):
     def __init__(
         self,
-        source_plot: PlotWidget | list[tuple[str, PlotWidget | list[PlotWidget]] | tuple[str, PlotWidget | list[PlotWidget], str]],
+        source_plot: PlotWidget
+        | CombinedPlotWidget
+        | list[
+            tuple[str, PlotWidget | list[PlotWidget]]
+            | tuple[str, PlotWidget | list[PlotWidget], str]
+        ],
         start_dir: str,
         parent: QWidget | None = None,
         suggested_filename: str = "graph.png",
+        configure_only: bool = False,
     ) -> None:
         super().__init__(parent)
         self.language = getattr(parent, "language", "ja")
-        self.setWindowTitle(_tr("PNG出力プレビュー", self.language))
+        self.configure_only = configure_only
+        self.setWindowTitle(
+            _tr(
+                "全ケースPNG設定" if configure_only else "PNG出力プレビュー",
+                self.language,
+            )
+        )
         self.resize(1100, 760)
         self.start_dir = start_dir
         self.suggested_filename = suggested_filename
         self.saved_path: Path | None = None
+        self.configured_settings: GraphSettings | None = None
         if isinstance(source_plot, list):
             self.source_options = [
                 (item[0], item[1] if isinstance(item[1], list) else [item[1]], item[2] if len(item) >= 3 else suggested_filename)
                 for item in source_plot
+            ]
+        elif isinstance(source_plot, CombinedPlotWidget):
+            self.source_options = [
+                (
+                    _tr("グラフ", self.language),
+                    source_plot.source_plots,
+                    suggested_filename,
+                )
             ]
         else:
             self.source_options = [(_tr("グラフ", self.language), [source_plot], suggested_filename)]
@@ -1777,6 +1810,16 @@ class GraphPngPreviewDialog(QDialog):
         help_hint.setWordWrap(True)
         help_hint.setProperty("role", "muted")
         settings_layout.addWidget(help_hint)
+        if self.configure_only:
+            bulk_hint = QLabel(
+                _tr(
+                    "この設定を全ケースのPNGへ適用します。タイトルを変更しなければ、各画像のケース名は維持されます。",
+                    self.language,
+                )
+            )
+            bulk_hint.setWordWrap(True)
+            bulk_hint.setProperty("role", "muted")
+            settings_layout.addWidget(bulk_hint)
         self.preview_stack = QStackedWidget()
         self.preview_scroll_areas: list[QScrollArea] = []
         for widget in self.preview_widgets:
@@ -1960,7 +2003,12 @@ class GraphPngPreviewDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Save | QDialogButtonBox.Reset | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Save).setText(_tr("保存", self.language))
+        buttons.button(QDialogButtonBox.Save).setText(
+            _tr(
+                "全ケースへ適用" if self.configure_only else "保存",
+                self.language,
+            )
+        )
         buttons.button(QDialogButtonBox.Reset).setText(_tr("設定をリセット", self.language))
         buttons.button(QDialogButtonBox.Cancel).setText(_tr("キャンセル", self.language))
         layout.addWidget(buttons)
@@ -2149,7 +2197,11 @@ class GraphPngPreviewDialog(QDialog):
 
         self._set_control_help(
             buttons.button(QDialogButtonBox.Save),
-            "現在プレビューしている内容と表示設定でPNGを保存します。",
+            (
+                "現在の表示設定を全ケースのPNGへ適用します。"
+                if self.configure_only
+                else "現在プレビューしている内容と表示設定でPNGを保存します。"
+            ),
         )
         self._set_control_help(
             buttons.button(QDialogButtonBox.Reset),
@@ -2430,6 +2482,9 @@ class GraphPngPreviewDialog(QDialog):
         settings.grid_line_width = self.grid_line_width_spin.value()
         settings.grid_line_style = _combo_data(self.grid_line_style_combo, "-")
         settings.axis_auto = self.axis_auto_check.isChecked()
+        settings.axis_mode = (
+            "per_plot_auto" if settings.axis_auto else "manual_fixed"
+        )
         settings.x_min = self.x_min_spin.value()
         settings.x_max = self.x_max_spin.value()
         settings.y_min = self.y_min_spin.value()
@@ -2520,6 +2575,13 @@ class GraphPngPreviewDialog(QDialog):
 
     @Slot()
     def save_png(self) -> None:
+        self.apply_settings()
+        if self.configure_only:
+            self.configured_settings = GraphSettings(
+                **vars(self.preview_plot.settings)
+            )
+            self.accept()
+            return
         index = self.source_combo.currentIndex() if self.source_combo is not None else 0
         filename = self.source_options[index][2] if 0 <= index < len(self.source_options) else self.suggested_filename
         start_path = str(Path(self.start_dir) / filename)
@@ -5480,6 +5542,14 @@ class MainWindow(QMainWindow):
             plot.clear("保存対象外のグラフです")
         return plot
 
+    @staticmethod
+    def _apply_export_settings(
+        plot: PlotWidget | CombinedPlotWidget,
+        settings: GraphSettings,
+    ) -> None:
+        plot.settings = GraphSettings(**vars(settings))
+        plot.redraw()
+
     def _plot_combined_theory_result_for_export(self, result: CaseResult, base_plot: PlotWidget) -> CombinedPlotWidget:
         em_plot = PlotWidget()
         radius_plot = PlotWidget()
@@ -5852,6 +5922,30 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "対象外", "可視化タブは全ケースPNG出力の対象外です。")
             return
+
+        preview_result = None
+        if kind != "evaporation_time_all_cases":
+            preview_result = self.current_result() or next(
+                (result for result in self.results if result.status == "ok"),
+                self.results[0],
+            )
+        preview_plot = self._plot_for_export(kind, preview_result, base_plot)
+        preview_filename = self._suggested_png_filename(kind, preview_result)
+        settings_dialog = GraphPngPreviewDialog(
+            preview_plot,
+            self._local_dialog_start_dir(),
+            self,
+            preview_filename,
+            configure_only=True,
+        )
+        try:
+            accepted = settings_dialog.exec() == QDialog.Accepted
+            export_settings = settings_dialog.configured_settings
+        finally:
+            preview_plot.close()
+        if not accepted or export_settings is None:
+            return
+
         out_dir = self._choose_output_directory("PNG出力フォルダ", f"mdfoam_png_{_timestamp()}")
         if out_dir is None:
             return
@@ -5860,14 +5954,22 @@ class MainWindow(QMainWindow):
         try:
             if kind == "evaporation_time_all_cases":
                 plot = self._plot_for_export(kind, None, base_plot)
-                plot.save_png(out_dir / "evaporation_time_all_cases.png")
-                plot.close()
+                try:
+                    self._apply_export_settings(plot, export_settings)
+                    plot.save_png(out_dir / "evaporation_time_all_cases.png")
+                finally:
+                    plot.close()
                 saved_count = 1
             else:
                 for result in self.results:
                     plot = self._plot_for_export(kind, result, base_plot)
-                    plot.save_png(out_dir / self._suggested_png_filename(kind, result))
-                    plot.close()
+                    try:
+                        self._apply_export_settings(plot, export_settings)
+                        plot.save_png(
+                            out_dir / self._suggested_png_filename(kind, result)
+                        )
+                    finally:
+                        plot.close()
                     saved_count += 1
         except Exception as exc:
             QMessageBox.warning(self, "PNG出力エラー", str(exc))
